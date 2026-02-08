@@ -3086,10 +3086,23 @@
             `;
         }
 
-        function clearDiscoveryCache() {
+        async function clearDiscoveryCache() {
             thirdPartyData = null;
             thirdPartyCacheChecked = true; // Don't re-check cache
-            renderThirdParty(); // Back to start screen with Tiefensuche/Schnellsuche
+            renderThirdParty(); // Back to start screen immediately
+
+            // Also clear backend DB cache
+            try {
+                const country = document.getElementById('country').value;
+                await fetch(`${API_BASE}/brand-discovery`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ brand: selectedPageName, country, clear_cache: true })
+                });
+                console.log('Backend cache cleared for', selectedPageName);
+            } catch (e) {
+                console.log('Failed to clear backend cache:', e);
+            }
         }
 
         async function startDiscovery(forceRefresh = false) {

@@ -40,7 +40,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY');
-    const metaToken = Deno.env.get('META_ACCESS_TOKEN');
+    const metaToken = Deno.env.get('META_ACCESS_TOKEN_V2') || Deno.env.get('META_ACCESS_TOKEN');
     const workerUrl = Deno.env.get('WORKER_URL');         // e.g., "http://your-vps:8787"
     const workerSecret = Deno.env.get('WORKER_API_SECRET');
     const scrapingBeeKey = Deno.env.get('SCRAPINGBEE_API_KEY');
@@ -83,10 +83,22 @@ serve(async (req) => {
     // ============================================
     if (req.method === 'POST') {
       const body = await req.json();
-      const { brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh, mode } = body;
+      const { brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh, mode, clear_cache } = body;
 
       if (!brand) {
         return jsonResponse({ error: 'brand is required' }, 400);
+      }
+
+      // Clear cache only — delete DB entry and return
+      if (clear_cache && supabase) {
+        const brandLower = brand.toLowerCase().trim();
+        const effectiveCountry = country || 'DE';
+        await supabase.from('domain_mapping_cache')
+          .delete()
+          .eq('brand', brandLower)
+          .eq('country', effectiveCountry);
+        console.log(`[Discovery] Cache cleared for "${brand}" / ${effectiveCountry}`);
+        return jsonResponse({ success: true, status: 'cache_cleared', brand: brandLower });
       }
 
       // mode: 'quick' = direct edge function execution (skip worker)

@@ -29,6 +29,7 @@ import { generateKeywords, refineKeywordsWithAI } from './keyword-generator.ts';
 import { trackPresellChain } from './presell-tracker.ts';
 import { extractDomainFromCaption, extractFullUrlFromCaption, extractLandingPageUrl } from './url-extractor.ts';
 import { scrapeWithHeadless } from './headless-scraper.ts';
+import { detectBrandFromCheckout } from './checkout-detector.ts';
 
 // ============================================
 // Configuration
@@ -1324,6 +1325,35 @@ async function checkDomainForBrand(
                 // Vendor check failed, continue
               }
             }
+
+            // CTA led to a non-brand domain — check if the checkout page mentions the brand
+            // Covers WooCommerce, Digistore24, Magento, custom shops
+            if (ctaFinalDomain && presellResult.final_url) {
+              try {
+                const checkoutResult = await detectBrandFromCheckout(presellResult.final_url, { timeout: 8000 });
+                if (checkoutResult.brand_name) {
+                  const checkoutBrandLower = checkoutResult.brand_name.toLowerCase();
+                  const brandMatch = brandInfo.brand_aliases.some(alias =>
+                    alias.length >= 4 && (checkoutBrandLower.includes(alias) || alias.includes(checkoutBrandLower))
+                  );
+                  if (brandMatch) {
+                    result.is_match = true;
+                    result.match_type = 'checkout_match';
+                    result.confidence = Math.min(checkoutResult.confidence, 0.85);
+                    result.vendor_name = checkoutResult.brand_name;
+                    result.shop_domain = ctaFinalDomain;
+                    result.redirect_chain = presellResult.chain;
+                    console.log(`[Discovery]   checkout → brand "${checkoutResult.brand_name}" (${checkoutResult.platform}, ${checkoutResult.detection_method}) → MATCH`);
+                    console.log(`[Discovery]   RESULT: ✓ MATCH (checkout_brand, confidence: ${result.confidence})`);
+                    return result;
+                  } else {
+                    console.log(`[Discovery]   checkout → brand "${checkoutResult.brand_name}" ≠ ${brandInfo.brand_name}`);
+                  }
+                }
+              } catch {
+                // Checkout detection failed, continue
+              }
+            }
           } else {
             console.log(`[Discovery]   presell CTA (${presellUrl.substring(0, 60)}) → no CTA found`);
           }
@@ -1548,6 +1578,30 @@ async function checkDomainForBrand(
                   console.log(`[Discovery]   6g: CTA redirect ${ctaLink.substring(0, 60)} → ${redirectResult.final_url} → MATCH`);
                   console.log(`[Discovery]   RESULT: ✓ MATCH (presell_cta_redirect, confidence: 0.85)`);
                   return result;
+                }
+
+                // CTA led to non-brand domain — check checkout page for brand
+                if (ctaFinalDomain) {
+                  try {
+                    const checkoutResult = await detectBrandFromCheckout(redirectResult.final_url, { timeout: 8000 });
+                    if (checkoutResult.brand_name) {
+                      const checkoutBrandLower = checkoutResult.brand_name.toLowerCase();
+                      const brandMatch = brandInfo.brand_aliases.some(alias =>
+                        alias.length >= 4 && (checkoutBrandLower.includes(alias) || alias.includes(checkoutBrandLower))
+                      );
+                      if (brandMatch) {
+                        result.is_match = true;
+                        result.match_type = 'checkout_match';
+                        result.confidence = Math.min(checkoutResult.confidence, 0.85);
+                        result.vendor_name = checkoutResult.brand_name;
+                        result.shop_domain = ctaFinalDomain;
+                        result.redirect_chain = redirectResult.chain;
+                        console.log(`[Discovery]   6g: Checkout brand "${checkoutResult.brand_name}" (${checkoutResult.platform}) → MATCH`);
+                        console.log(`[Discovery]   RESULT: ✓ MATCH (checkout_brand_rendered, confidence: ${result.confidence})`);
+                        return result;
+                      }
+                    }
+                  } catch { /* checkout detection failed */ }
                 }
               }
             } catch { /* skip this CTA */ }

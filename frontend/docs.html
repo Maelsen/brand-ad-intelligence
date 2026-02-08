@@ -451,14 +451,16 @@
                     <div class="step">
                         <div class="step-number">6</div>
                         <h4>Jede Domain verifizieren</h4>
-                        <p>Das ist der aufwendigste Step und läuft auf einem eigenen <strong>VPS Server</strong> (Hetzner, 4GB RAM). Für jede der 300+ Domains wird geprüft ob sie tatsächlich zur Brand führt. Das passiert in mehreren Stufen:</p>
+                        <p>Das ist der aufwendigste Step und läuft auf einem eigenen <strong>VPS Server</strong> (Hetzner, 4GB RAM). Für jede der 300+ Domains wird geprüft ob sie tatsächlich zur Brand führt. Das passiert in mehreren Stufen, von kostenlos bis bezahlt:</p>
                         <ul style="margin-top: 10px; color: var(--text-secondary); font-size: 0.9rem; padding-left: 18px;">
                             <li><strong>Redirect Check</strong> — leitet die Domain direkt zum Brand Shop weiter? Einfacher HTTP Request reicht</li>
                             <li><strong>Shopify Vendor Check</strong> — bei Shopify Shops wird <code>/products.json</code> gecheckt ob die Brand als Vendor gelistet ist. Komplett kostenlos</li>
-                            <li><strong>Presell Check</strong> — die Homepage wird nach CTAs durchsucht ("Jetzt bestellen", "Zum Angebot" etc.) und gecheckt ob der Link zum Brand Shop führt</li>
-                            <li><strong>ScrapingBee Headless Check</strong> — wenn die einfachen Checks nichts finden, wird <strong>ScrapingBee</strong> genutzt um die Seite mit einem echten Headless Browser zu rendern. Manche Presell Pages laden ihre Links erst per JavaScript nach, das fängt man nur so</li>
+                            <li><strong>Presell CTA Check</strong> — die Homepage und die konkreten Ad Landing Pages werden nach CTAs durchsucht ("Jetzt bestellen", "Zum Angebot" etc.) und gecheckt ob der Link zum Brand Shop führt</li>
+                            <li><strong>Checkout Detection</strong> — wenn der CTA nicht direkt zum Brand Shop führt sondern zu einem Digistore24, WooCommerce oder anderem Checkout, wird auf der Checkout Seite der Produktname gecheckt. Funktioniert mit Shopify, WooCommerce, Magento und Custom Shops</li>
+                            <li><strong>Ad URL Analyse</strong> — die URLs aus den Ad Snapshots werden gecheckt. Wenn ne Ad gleichzeitig zur Drittseite UND zum Brand Shop verlinkt, ist das ein Treffer. Auch URL Pfade werden geprüft, z.B. <code>/angebot/glow25-kollagen/</code></li>
+                            <li><strong>ScrapingBee Headless Check</strong> — wenn die kostenlosen Checks nichts finden, wird <strong>ScrapingBee</strong> genutzt um die Seite mit einem echten Headless Browser zu rendern. Manche Presell Pages laden ihre CTAs erst per JavaScript. ScrapingBee rendert die Seite, findet die Links und folgt ihnen bis zum Shop. Auch hier wird bei unbekannten Checkouts der Produktname geprüft</li>
                         </ul>
-                        <p class="detail">Bei 300+ Domains dauert das so 15 bis 25 Minuten. Jede Domain wird einzeln abgearbeitet.</p>
+                        <p class="detail">Bei 300+ Domains dauert das so 15 bis 25 Minuten. Jede Domain wird einzeln abgearbeitet. Erst wenn alle kostenlosen Checks durchgelaufen sind, wird ScrapingBee als Fallback genutzt.</p>
                     </div>
 
                     <div class="step">
@@ -555,10 +557,10 @@
                 <h2 class="section-title">Caching</h2>
                 <div class="card">
                     <p>
-                        Ergebnisse werden <strong>7 Tage gecacht</strong>. Wenn du morgen nochmal nach der gleichen Brand suchst, bekommst du die Ergebnisse sofort ohne warten zu müssen.
+                        Ergebnisse werden <strong>7 Tage gecacht</strong>. Wenn du morgen nochmal nach der gleichen Brand suchst, bekommst du die Ergebnisse sofort ohne warten zu müssen. Auch beim Tab Wechsel oder Seite neu laden gehen die Ergebnisse nicht verloren.
                     </p>
                     <p style="margin-top: 12px;">
-                        Wenn du ne frische Suche brauchst (weil sich die Ads geändert haben oder so), klick einfach nochmal auf Tiefensuche oder Schnellsuche. Die starten immer ne neue Suche und überschreiben den alten Cache.
+                        Wenn du ne frische Suche brauchst (weil sich die Ads geändert haben oder so), klick auf den <strong>CACHED ↻</strong> Badge oben bei den Ergebnissen. Dann wird der alte Cache gelöscht und eine komplett neue Suche gestartet.
                     </p>
                 </div>
             </div>
@@ -601,8 +603,10 @@
                 <div class="card">
                     <h3>Match Typen</h3>
                     <ul>
-                        <li><span class="badge badge-green">LINK TO BRAND</span> — die Seite hat nen Link der direkt zum Brand Shop führt (z.B. ein "Jetzt kaufen" Button)</li>
+                        <li><span class="badge badge-green">PRESELL CTA</span> — die Seite hat nen CTA Button ("Jetzt kaufen" etc.) der zum Brand Shop führt. Auch über mehrere Redirects und Tracking Links</li>
+                        <li><span class="badge badge-green">LINK TO BRAND</span> — die Seite verlinkt direkt zum Brand Shop, oder die Ad URL enthält den Brand Namen im Pfad</li>
                         <li><span class="badge badge-blue">REDIRECT</span> — die Domain leitet automatisch zum Brand Shop weiter</li>
+                        <li><span class="badge badge-blue">CHECKOUT</span> — der CTA führt zu einem Checkout (Digistore24, WooCommerce etc.) und auf der Checkout Seite ist der Brand Name im Produktnamen</li>
                         <li><span class="badge badge-orange">SHOPIFY VENDOR</span> — die Brand ist als Vendor im Shopify Shop gelistet</li>
                     </ul>
                 </div>

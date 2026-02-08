@@ -2257,6 +2257,7 @@
             let hasQuickResults = false;
 
             // Handle QUICK results first (should arrive in 2-3 seconds)
+            let apiError = null;
             try {
                 const quickData = await quickPromise;
                 console.log('Quick search result:', quickData);
@@ -2266,6 +2267,8 @@
                     updateSearchStatus('quick', quickData.pages.length, quickData.search_time_ms);
                     renderPageList(quickData.pages, true);
                     document.getElementById('pageSelection').classList.add('visible');
+                } else if (!quickData.success && quickData.error) {
+                    apiError = quickData.error;
                 }
             } catch (error) {
                 console.log('Quick search failed:', error);
@@ -2281,12 +2284,18 @@
                     renderPageList(fullData.pages, false);
                     document.getElementById('pageSelection').classList.add('visible');
                 } else if (!hasQuickResults) {
-                    alert('Keine Pages gefunden für: ' + query);
+                    // Check if there's an API error (rate limit, auth, etc.)
+                    const errorMsg = (fullData.error || apiError);
+                    if (errorMsg) {
+                        alert(errorMsg);
+                    } else {
+                        alert('Keine Pages gefunden für: ' + query);
+                    }
                 }
             } catch (error) {
                 console.error('Full search error:', error);
                 if (!hasQuickResults) {
-                    alert('Fehler: ' + error.message);
+                    alert(apiError || 'Fehler: ' + error.message);
                 }
             }
 
@@ -3077,10 +3086,10 @@
             `;
         }
 
-        async function startDiscoveryForceRefresh() {
+        function clearDiscoveryCache() {
             thirdPartyData = null;
             thirdPartyCacheChecked = true; // Don't re-check cache
-            return startDiscovery(true);
+            renderThirdParty(); // Back to start screen with Tiefensuche/Schnellsuche
         }
 
         async function startDiscovery(forceRefresh = false) {
@@ -3347,7 +3356,7 @@
                                 <span class="scan-stat">${scanStats.scan_duration_seconds || 0}s</span>
                             </div>
                         ` : ''}
-                        ${data.status === 'cached' ? `<span class="cached-badge" style="cursor:pointer;" onclick="startDiscoveryForceRefresh()" title="Klicken um Cache zu löschen und neu zu scannen">CACHED ↻</span>` : ''}
+                        ${data.status === 'cached' ? `<span class="cached-badge" style="cursor:pointer;" onclick="clearDiscoveryCache()" title="Cache löschen und zurück zur Auswahl">CACHED ✕</span>` : ''}
                     </div>
                 ` : ''}
 

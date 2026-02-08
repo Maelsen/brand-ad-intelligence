@@ -2376,6 +2376,7 @@
             // Reset third party data and enrichment when loading new page
             thirdPartyData = null;
             thirdPartyLoading = false;
+            thirdPartyCacheChecked = false;
             enrichedUrlData = null;
             enrichmentLoading = false;
             enrichmentFirstCall = true;
@@ -2985,13 +2986,14 @@
         // Drittseiten Finder (Teil 2) — Brand Discovery
         let thirdPartyData = null;
         let thirdPartyLoading = false;
+        let thirdPartyCacheChecked = false;
         let discoveryJobId = null;
         let discoveryPollInterval = null;
 
         async function renderThirdParty() {
             const resultsEl = document.getElementById('results');
 
-            // Show cached data if available
+            // Show cached data if available in memory
             if (thirdPartyData) {
                 renderThirdPartyContent(thirdPartyData);
                 return;
@@ -3007,6 +3009,39 @@
                     </div>
                 `;
                 return;
+            }
+
+            // Check backend cache first (no force_refresh)
+            if (selectedPageName && !thirdPartyCacheChecked) {
+                thirdPartyCacheChecked = true;
+                resultsEl.innerHTML = `
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p class="loading-text">Prüfe Cache...</p>
+                    </div>
+                `;
+                try {
+                    const country = document.getElementById('country').value;
+                    const response = await fetch(`${API_BASE}/brand-discovery`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            brand: selectedPageName,
+                            country,
+                            use_headless: false,
+                        })
+                    });
+                    const data = await response.json();
+                    if (data.success && data.status === 'cached') {
+                        console.log('Loaded from cache:', data);
+                        thirdPartyData = data;
+                        window._discoveryResult = data;
+                        renderThirdPartyContent(data);
+                        return;
+                    }
+                } catch (e) {
+                    console.log('Cache check failed:', e);
+                }
             }
 
             // Show start screen with discovery button

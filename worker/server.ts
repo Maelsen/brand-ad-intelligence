@@ -366,6 +366,23 @@ async function handleRequest(req: Request, supabase: SupabaseClient | null): Pro
     }, corsHeaders, 202);
   }
 
+  // POST /api/clear — Clear all queued jobs and stop processing
+  if (path === '/api/clear' && req.method === 'POST') {
+    const cleared = jobQueue.length;
+    // Remove queued jobs
+    for (const jobId of [...jobQueue]) {
+      jobs.delete(jobId);
+    }
+    jobQueue.length = 0;
+    isProcessing = false;
+    console.log(`[Worker] Cleared ${cleared} queued jobs`);
+    return jsonResponse({
+      status: 'cleared',
+      jobs_cleared: cleared,
+      jobs_remaining: jobs.size,
+    }, corsHeaders);
+  }
+
   return jsonResponse({ error: 'Not found' }, corsHeaders, 404);
 }
 

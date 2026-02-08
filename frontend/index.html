@@ -3078,10 +3078,13 @@
         }
 
         async function startDiscoveryForceRefresh() {
+            thirdPartyData = null;
+            thirdPartyCacheChecked = true; // Don't re-check cache
             return startDiscovery(true);
         }
 
         async function startDiscovery(forceRefresh = false) {
+            thirdPartyData = null;
             thirdPartyLoading = true;
             const resultsEl = document.getElementById('results');
 
@@ -3102,7 +3105,7 @@
                         brand: selectedPageName,
                         country,
                         use_headless: true,
-                        force_refresh: true,
+                        force_refresh: forceRefresh,
                     })
                 });
 

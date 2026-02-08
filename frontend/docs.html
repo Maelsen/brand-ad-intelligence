@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dokumentation — Brand Ad Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #f8f9fc;
+            --bg-card: #ffffff;
+            --bg-subtle: #f1f3f9;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+            --accent-primary: #2563eb;
+            --accent-primary-hover: #1d4ed8;
+            --accent-secondary: #06b6d4;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-danger: #ef4444;
+            --border-light: #e2e8f0;
+            --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+            --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+            --font-display: 'Instrument Serif', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app-header {
+            background: rgba(255, 255, 255, 0.95);
+            border-bottom: 1px solid var(--border-light);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(12px);
+        }
+
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 0 24px;
+            width: 100%;
+        }
+
+        .header-container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 24px;
+            width: 100%;
+        }
+
+        .header-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .brand-icon {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-md);
+        }
+
+        .brand-icon svg { width: 24px; height: 24px; color: white; }
+
+        .brand-text { display: flex; flex-direction: column; }
+
+        .brand-name {
+            font-family: var(--font-display);
+            font-size: 1.35rem;
+            font-weight: 400;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .brand-subtitle {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--accent-primary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            transition: background 0.15s;
+        }
+
+        .back-link:hover { background: var(--bg-subtle); }
+
+        /* Content */
+        .hero {
+            padding: 60px 0 40px;
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: 2.5rem;
+            font-weight: 400;
+            letter-spacing: -0.03em;
+            margin-bottom: 12px;
+        }
+
+        .hero p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 560px;
+            margin: 0 auto;
+        }
+
+        .section {
+            margin-bottom: 48px;
+        }
+
+        .section-title {
+            font-family: var(--font-display);
+            font-size: 1.6rem;
+            font-weight: 400;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border-light);
+            letter-spacing: -0.02em;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .card h3 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card p, .card li {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.7;
+        }
+
+        .card ul {
+            padding-left: 20px;
+            margin-top: 8px;
+        }
+
+        .card li { margin-bottom: 6px; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+        }
+
+        .badge-blue { background: #dbeafe; color: #1e40af; }
+        .badge-green { background: #d1fae5; color: #065f46; }
+        .badge-orange { background: #fef3c7; color: #92400e; }
+        .badge-purple { background: #ede9fe; color: #5b21b6; }
+
+        .step-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .step {
+            background: var(--bg-card);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+            position: relative;
+            padding-left: 72px;
+        }
+
+        .step-number {
+            position: absolute;
+            left: 22px;
+            top: 22px;
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 0.85rem;
+        }
+
+        .step h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .step p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .step .detail {
+            margin-top: 8px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        .compare-table th, .compare-table td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-light);
+            font-size: 0.9rem;
+        }
+
+        .compare-table th {
+            font-weight: 600;
+            color: var(--text-primary);
+            background: var(--bg-subtle);
+        }
+
+        .compare-table td { color: var(--text-secondary); }
+
+        .compare-table tr:last-child td { border-bottom: none; }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #eff6ff 0%, #f0fdfa 100%);
+            border: 1px solid #bfdbfe;
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin: 24px 0;
+        }
+
+        .highlight-box h3 {
+            color: var(--accent-primary);
+            margin-bottom: 8px;
+            font-size: 1rem;
+        }
+
+        .highlight-box p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .app-footer {
+            border-top: 1px solid var(--border-light);
+            padding: 24px 0;
+            margin-top: 60px;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .footer-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .footer-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.85rem;
+        }
+
+        .footer-links a:hover { color: var(--accent-primary); }
+
+        @media (max-width: 640px) {
+            .hero h1 { font-size: 1.8rem; }
+            .step { padding-left: 62px; }
+            .container { padding: 0 16px; }
+            .compare-table { font-size: 0.8rem; }
+            .compare-table th, .compare-table td { padding: 8px 10px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-container">
+            <div class="header-content">
+                <a href="index.html" class="brand">
+                    <div class="brand-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                        </svg>
+                    </div>
+                    <div class="brand-text">
+                        <span class="brand-name">Brand Ad Intelligence</span>
+                        <span class="brand-subtitle">Dokumentation</span>
+                    </div>
+                </a>
+                <a href="index.html" class="back-link">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                    Zum Tool
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="container">
+            <div class="hero">
+                <h1>Wie funktioniert das Tool?</h1>
+                <p>Hier erklaer ich dir kurz, was das Tool macht, wie die Drittseiten-Suche funktioniert und was du damit alles anstellen kannst.</p>
+            </div>
+
+            <!-- Was ist das? -->
+            <div class="section">
+                <h2 class="section-title">Was ist Brand Ad Intelligence?</h2>
+                <div class="card">
+                    <p>
+                        Hey! Ich hab dir ein Tool gebaut, mit dem du checken kannst, <strong>welche Facebook Pages Werbung fuer eine bestimmte Brand schalten</strong> — auch wenn die das gar nicht offen sagen.
+                    </p>
+                    <p style="margin-top: 12px;">
+                        Das Tool nutzt die offizielle <strong>Meta Ad Library</strong> (also Facebooks Werbebibliothek) und analysiert automatisch tausende Anzeigen, um rauszufinden wer fuer wen wirbt. Du gibst einfach einen Markennamen ein, z.B. "Glow25", und das Tool findet alle Facebook Pages die Ads schalten, die am Ende auf den Glow25-Shop verlinken.
+                    </p>
+                    <p style="margin-top: 12px;">
+                        Das Ganze laeuft komplett automatisiert — du musst nur den Namen eingeben und warten.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Features -->
+            <div class="section">
+                <h2 class="section-title">Was kann das Tool?</h2>
+
+                <div class="card">
+                    <h3>
+                        <svg width="20" height="20" fill="none" stroke="#2563eb" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        Brand-Suche
+                    </h3>
+                    <p>Gib einen Markennamen ein und das Tool findet sofort die passende Facebook Page mit allen aktiven Anzeigen. Du siehst auf einen Blick wie viele Ads laufen und welche Domains beworben werden.</p>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        <svg width="20" height="20" fill="none" stroke="#10b981" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        Anzeigen-Analyse
+                    </h3>
+                    <p>Alle Ads werden uebersichtlich angezeigt — mit Vorschaubild, Text, Landing Page und Reichweite. Du kannst direkt sehen welche Creatives die Brand nutzt und wohin die Ads verlinken.</p>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        <svg width="20" height="20" fill="none" stroke="#f59e0b" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                        Drittseiten-Finder <span class="badge badge-purple">Hauptfeature</span>
+                    </h3>
+                    <p>Das Herzstuck: Findet automatisch <strong>alle Facebook Pages die Werbung fuer eine Brand schalten</strong> — auch Affiliate-Seiten, Presell-Pages und versteckte Advertiser. Mehr dazu weiter unten.</p>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        <svg width="20" height="20" fill="none" stroke="#06b6d4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        Domain-Mapping
+                    </h3>
+                    <p>Zeigt dir genau welche Domains (Shops, Presell-Seiten, Advertorials) in den Ads beworben werden und wohin sie weiterleiten. So siehst du die gesamte Werbestruktur einer Brand.</p>
+                </div>
+            </div>
+
+            <!-- Drittseiten-Finder Detail -->
+            <div class="section">
+                <h2 class="section-title">So funktioniert der Drittseiten-Finder</h2>
+
+                <div class="card">
+                    <p>
+                        Der Drittseiten-Finder ist das Hauptfeature. Er findet Facebook Pages die <strong>fuer eine Brand werben, ohne dass die Brand das selbst macht</strong>. Das sind meistens Affiliate-Partner, Presell-Seiten oder Advertorial-Netzwerke.
+                    </p>
+                    <p style="margin-top: 12px;">
+                        Das Besondere: Viele dieser Seiten erwaehnen den Brand-Namen gar nicht in ihrer Werbung. Die schalten Ads mit generischen Texten wie "Das beste Kollagen-Pulver" und verlinken dann ueber Umwege auf den eigentlichen Shop. Genau das findet dieses Tool trotzdem.
+                    </p>
+                </div>
+
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">Das passiert im Hintergrund wenn du auf "Tiefensuche" oder "Schnellsuche" klickst:</p>
+
+                <div class="step-grid">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <h4>Brand-Ads laden</h4>
+                        <p>Das Tool sucht in der Meta Ad Library nach der Brand und laedt alle aktiven Anzeigen. Daraus wird die Brand-Domain extrahiert (z.B. glow25.de).</p>
+                        <p class="detail">Bis zu 500 Ads bei Tiefensuche, 200 bei Schnellsuche</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <h4>Shop-Typ erkennen</h4>
+                        <p>Das Tool checkt automatisch ob der Shop auf Shopify, WooCommerce, Shopware oder einem anderen System laeuft. Das hilft spaeter bei der Verifizierung.</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <h4>Keywords generieren</h4>
+                        <p>Aus den Ad-Texten der Brand werden automatisch relevante Keywords extrahiert. Eine KI verfeinert diese dann zu Nischen-Keywords (z.B. "Kollagen Pulver", "Hautpflege Supplement").</p>
+                        <p class="detail">Bis zu 8 Keywords bei Tiefensuche, 3 bei Schnellsuche</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <h4>Keyword-Ads durchsuchen</h4>
+                        <p>Fuer jedes Keyword wird die gesamte Ad Library durchsucht. So findet das Tool auch Advertiser die den Brand-Namen gar nicht erwaehnen, aber im selben Bereich werben.</p>
+                        <p class="detail">Bis zu 300 Ads pro Keyword — das sind tausende Anzeigen die analysiert werden</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">5</div>
+                        <h4>Domains sammeln & filtern</h4>
+                        <p>Aus allen gefundenen Ads werden die beworbenen Domains extrahiert. Spam und bekannte Ad-Farmen werden automatisch rausgefiltert. Uebrig bleiben die relevanten Domains.</p>
+                        <p class="detail">Typisch: ~3000 Ads werden zu ~150-330 unique Domains zusammengefasst</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">6</div>
+                        <h4>Jede Domain verifizieren</h4>
+                        <p>Jetzt kommt der wichtigste Schritt: Fuer jede Domain wird geprueft ob sie tatsaechlich zur Brand fuehrt. Dafuer nutzt das Tool mehrere Methoden:</p>
+                        <ul style="margin-top: 8px; color: var(--text-secondary); font-size: 0.9rem; padding-left: 18px;">
+                            <li><strong>Redirect-Check:</strong> Leitet die Domain direkt zum Brand-Shop weiter?</li>
+                            <li><strong>Shopify-Check:</strong> Ist die Brand als Vendor im Shop gelistet?</li>
+                            <li><strong>Presell-Check:</strong> Hat die Seite einen "Jetzt kaufen"-Button der zum Brand fuehrt?</li>
+                            <li><strong>Headless-Check:</strong> Seite wird mit echtem Browser geladen und auf Links geprueft</li>
+                        </ul>
+                        <p class="detail">Das ist der laengste Schritt — bei 300+ Domains dauert das einige Minuten</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">7</div>
+                        <h4>Ergebnisse zusammenstellen</h4>
+                        <p>Alle verifizierten Matches werden zusammengefasst und nach Confidence sortiert. Nur Ergebnisse mit mindestens 70% Sicherheit werden angezeigt — lieber weniger zeigen als falsche Treffer.</p>
+                    </div>
+                </div>
+
+                <div class="highlight-box">
+                    <h3>Wichtig: Alles wird verifiziert</h3>
+                    <p>Eine Drittseite wird <strong>nur</strong> angezeigt wenn die URL-Chain tatsaechlich zur Brand fuehrt. Das Tool ratet nicht — es folgt den Links bis zum Shop und beweist die Verbindung. Das bedeutet: Was du siehst, stimmt auch wirklich.</p>
+                </div>
+            </div>
+
+            <!-- Tiefensuche vs Schnellsuche -->
+            <div class="section">
+                <h2 class="section-title">Tiefensuche vs. Schnellsuche</h2>
+
+                <div class="card">
+                    <p>Du hast zwei Optionen wenn du nach Drittseiten suchst:</p>
+
+                    <table class="compare-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th><span class="badge badge-blue">Tiefensuche</span></th>
+                                <th><span class="badge badge-green">Schnellsuche</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Dauer</strong></td>
+                                <td>~15 Minuten</td>
+                                <td>~60 Sekunden</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Ads gescannt</strong></td>
+                                <td>~2.500</td>
+                                <td>~200</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Keywords</strong></td>
+                                <td>8</td>
+                                <td>3</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Domains geprueft</strong></td>
+                                <td>Alle (~300+)</td>
+                                <td>Top 15</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Trefferquote</strong></td>
+                                <td>80-90%</td>
+                                <td>30-50%</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Am besten fuer</strong></td>
+                                <td>Vollstaendige Analyse</td>
+                                <td>Schneller Ueberblick</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <p style="margin-top: 16px; font-size: 0.88rem; color: var(--text-muted);">
+                        Tipp: Starte mit der Schnellsuche fuer einen ersten Eindruck. Wenn du die vollstaendige Liste brauchst, mach danach eine Tiefensuche.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Caching -->
+            <div class="section">
+                <h2 class="section-title">Caching</h2>
+                <div class="card">
+                    <p>
+                        Ergebnisse werden <strong>7 Tage lang gecacht</strong>. Wenn du also morgen nochmal nach der gleichen Brand suchst, bekommst du sofort die Ergebnisse ohne warten zu muessen.
+                    </p>
+                    <p style="margin-top: 12px;">
+                        Wenn du eine frische Suche brauchst (z.B. weil sich die Ads geaendert haben), klick einfach nochmal auf Tiefensuche oder Schnellsuche — die starten immer eine neue Suche und ueberschreiben den Cache.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Wie benutzen -->
+            <div class="section">
+                <h2 class="section-title">Quick-Start</h2>
+
+                <div class="step-grid">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <h4>Brand eingeben</h4>
+                        <p>Gib den Markennamen in die Suchleiste ein, z.B. "Glow25" oder "Athletic Greens". Klick auf "Pages suchen".</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <h4>Page auswaehlen</h4>
+                        <p>Waehle die richtige Facebook Page aus der Liste. Du erkennst sie meistens am Namen und der Anzahl der Ads.</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <h4>Ads laden</h4>
+                        <p>Klick auf "Ads von dieser Page laden". Das Tool laedt alle aktiven Anzeigen und zeigt dir eine Uebersicht.</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <h4>Drittseiten finden</h4>
+                        <p>Geh auf den Tab "Drittseiten" und starte entweder die Schnellsuche (60 Sek) oder die Tiefensuche (15 Min). Lehn dich zurueck und warte auf die Ergebnisse.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ergebnisse verstehen -->
+            <div class="section">
+                <h2 class="section-title">Ergebnisse verstehen</h2>
+
+                <div class="card">
+                    <h3>Match-Typen</h3>
+                    <ul>
+                        <li><span class="badge badge-green">LINK TO BRAND</span> — Die Seite verlinkt direkt zum Brand-Shop (z.B. ueber einen "Jetzt kaufen"-Button)</li>
+                        <li><span class="badge badge-blue">REDIRECT</span> — Die Domain leitet automatisch zum Brand-Shop weiter</li>
+                        <li><span class="badge badge-orange">SHOPIFY VENDOR</span> — Der Brand ist als Vendor im Shopify-Shop gelistet</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h3>Confidence (Sicherheit)</h3>
+                    <p>Jeder Treffer hat einen Confidence-Wert von 70-100%. Je hoeher, desto sicherer ist die Verbindung zwischen der Drittseite und der Brand. Alles unter 70% wird gar nicht erst angezeigt.</p>
+                </div>
+
+                <div class="card">
+                    <h3>Domain-Kategorien</h3>
+                    <ul>
+                        <li><strong>Presell / Advertorial:</strong> Seiten die wie Zeitungsartikel oder Testberichte aussehen und am Ende zum Shop verlinken</li>
+                        <li><strong>Shop / Final:</strong> Der eigentliche Online-Shop der Brand</li>
+                    </ul>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    Brand Ad Intelligence — Made by Marlin
+                </div>
+                <div class="footer-links">
+                    <a href="index.html">Zum Tool</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

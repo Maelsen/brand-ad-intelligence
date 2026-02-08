@@ -1168,6 +1168,10 @@ async function checkDomainForBrand(
 
   const brandDomain = brandInfo.brand_domain.toLowerCase();
 
+  // Pending weak match: content_match (brand name in HTML) is NOT a verified match.
+  // We only use it as a last-resort fallback if no URL-chain verification succeeds.
+  let pendingContentMatch: { confidence: number; vendor_name?: string; source: string } | null = null;
+
   console.log(`[Discovery] ${domain}:`);
 
   try {
@@ -1245,17 +1249,16 @@ async function checkDomainForBrand(
         }
 
         // Check if HTML mentions the brand name (vendor or aliases)
+        // NOTE: This is NOT a verified match — just a signal to continue checking.
+        // Only used as weak fallback if URL-chain verification (CTA, redirect, scraper) all fail.
         const htmlLower = fetchResult.html.toLowerCase();
         for (const alias of brandInfo.brand_aliases) {
           if (alias.length >= 4 && htmlLower.includes(alias)) {
-            result.is_match = true;
-            result.match_type = 'content_match';
-            result.confidence = 0.60;
-            result.shop_domain = brandInfo.brand_domain;
-            result.vendor_name = alias;
-            console.log(`[Discovery]   content → HTML contains alias "${alias}" → MATCH`);
-            console.log(`[Discovery]   RESULT: ✓ MATCH (content_match, confidence: 0.60)`);
-            return result;
+            if (!pendingContentMatch || 0.60 > pendingContentMatch.confidence) {
+              pendingContentMatch = { confidence: 0.60, vendor_name: alias, source: 'homepage_html' };
+            }
+            console.log(`[Discovery]   content → HTML contains alias "${alias}" → PENDING (not verified, continuing checks)`);
+            break;
           }
         }
       }
@@ -1402,17 +1405,14 @@ async function checkDomainForBrand(
               return result;
             }
 
-            // Check for brand aliases in HTML
+            // Check for brand aliases in HTML — NOT a verified match, just a signal
             for (const alias of brandInfo.brand_aliases) {
               if (alias.length >= 4 && htmlLower.includes(alias)) {
-                result.is_match = true;
-                result.match_type = 'content_match';
-                result.confidence = 0.65;
-                result.shop_domain = brandInfo.brand_domain;
-                result.vendor_name = alias;
-                console.log(`[Discovery]   6f: Landing page HTML contains alias "${alias}" → MATCH`);
-                console.log(`[Discovery]   RESULT: ✓ MATCH (landing_content_match, confidence: 0.65)`);
-                return result;
+                if (!pendingContentMatch || 0.65 > pendingContentMatch.confidence) {
+                  pendingContentMatch = { confidence: 0.65, vendor_name: alias, source: 'landing_page_html' };
+                }
+                console.log(`[Discovery]   6f: Landing page HTML contains alias "${alias}" → PENDING (not verified, continuing checks)`);
+                break;
               }
             }
             console.log(`[Discovery]   6f: Landing page ${specificUrl.substring(0, 60)} → no brand in HTML`);
@@ -1510,17 +1510,14 @@ async function checkDomainForBrand(
             return result;
           }
 
-          // Check 3: Does rendered HTML mention brand aliases?
+          // Check 3: Does rendered HTML mention brand aliases? — NOT a verified match
           for (const alias of brandInfo.brand_aliases) {
             if (alias.length >= 4 && htmlLower.includes(alias)) {
-              result.is_match = true;
-              result.match_type = 'content_match';
-              result.confidence = 0.70;
-              result.shop_domain = brandInfo.brand_domain;
-              result.vendor_name = alias;
-              console.log(`[Discovery]   6g: Rendered HTML contains alias "${alias}" → MATCH`);
-              console.log(`[Discovery]   RESULT: ✓ MATCH (presell_alias, confidence: 0.70)`);
-              return result;
+              if (!pendingContentMatch || 0.70 > pendingContentMatch.confidence) {
+                pendingContentMatch = { confidence: 0.70, vendor_name: alias, source: 'scrapingbee_rendered' };
+              }
+              console.log(`[Discovery]   6g: Rendered HTML contains alias "${alias}" → PENDING (not verified, continuing CTA checks)`);
+              break;
             }
           }
 
@@ -1563,6 +1560,18 @@ async function checkDomainForBrand(
       } catch (error) {
         console.log(`[Discovery]   6g: Error: ${String(error)}`);
       }
+    }
+
+    // All URL-chain verifications failed.
+    // Use pendingContentMatch as weak fallback ONLY if brand name was found in HTML.
+    if (pendingContentMatch) {
+      result.is_match = true;
+      result.match_type = 'content_match';
+      result.confidence = pendingContentMatch.confidence;
+      result.shop_domain = brandInfo.brand_domain;
+      result.vendor_name = pendingContentMatch.vendor_name || null;
+      console.log(`[Discovery]   RESULT: ~ WEAK MATCH (content_match via ${pendingContentMatch.source}, confidence: ${pendingContentMatch.confidence}) — no URL-chain verification succeeded`);
+      return result;
     }
 
     console.log(`[Discovery]   RESULT: ✗ NO MATCH`);

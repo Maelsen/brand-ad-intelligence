@@ -1,0 +1,23 @@
+# Environment & Secrets
+.env
+.env.*
+*.secret
+
+# Node
+node_modules/
+
+# Supabase local
+.supabase/
+
+# Worker deploy scripts with credentials
+worker/vps-setup.py
+worker/configure-vps.py
+
+# Temp files
+*.tmp
+*.log
+worker-result-*.json
+
+# OS
+.DS_Store
+Thumbs.db

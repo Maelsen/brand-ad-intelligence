@@ -1,0 +1,25 @@
+# Brand Ad Intelligence System - Supabase Configuration
+# For local development with supabase CLI
+
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+shadow_port = 54320
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"

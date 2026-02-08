@@ -83,7 +83,7 @@ serve(async (req) => {
     // ============================================
     if (req.method === 'POST') {
       const body = await req.json();
-      const { brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh, mode, clear_cache } = body;
+      const { brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh, mode, clear_cache, check_cache_only } = body;
 
       if (!brand) {
         return jsonResponse({ error: 'brand is required' }, 400);
@@ -132,6 +132,11 @@ serve(async (req) => {
             status: 'cached',
           });
         }
+      }
+
+      // If only checking cache, stop here — don't start a new discovery
+      if (check_cache_only) {
+        return jsonResponse({ success: false, status: 'no_cache', brand: brandLower });
       }
 
       // ----------------------------------------

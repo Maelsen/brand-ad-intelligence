@@ -3037,7 +3037,7 @@
                         body: JSON.stringify({
                             brand: selectedPageName,
                             country,
-                            use_headless: false,
+                            check_cache_only: true,
                         })
                     });
                     const data = await response.json();
@@ -3088,10 +3088,18 @@
 
         async function clearDiscoveryCache() {
             thirdPartyData = null;
-            thirdPartyCacheChecked = true; // Don't re-check cache
-            renderThirdParty(); // Back to start screen immediately
+            thirdPartyCacheChecked = true;
 
-            // Also clear backend DB cache
+            // Show loading while clearing
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p class="loading-text">Cache wird gelöscht...</p>
+                </div>
+            `;
+
+            // Clear backend DB cache and WAIT for it
             try {
                 const country = document.getElementById('country').value;
                 await fetch(`${API_BASE}/brand-discovery`, {
@@ -3103,6 +3111,9 @@
             } catch (e) {
                 console.log('Failed to clear backend cache:', e);
             }
+
+            // Now show start screen
+            renderThirdParty();
         }
 
         async function startDiscovery(forceRefresh = false) {

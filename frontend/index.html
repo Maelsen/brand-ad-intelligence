@@ -3015,6 +3015,7 @@
                         <div class="spinner"></div>
                         <p class="loading-text">Analysiere Drittseiten für "${selectedPageName}"...</p>
                         <p class="loading-subtext" id="discoveryProgress">Starte Discovery-Pipeline...</p>
+                        <button class="btn-discovery-quick" onclick="cancelDiscovery()" style="margin-top:16px; background:#e74c3c;">Abbrechen</button>
                     </div>
                 `;
                 return;
@@ -3116,9 +3117,52 @@
             renderThirdParty();
         }
 
+        let discoveryAbortController = null;
+
+        async function cancelDiscovery() {
+            // 1. Abort any running fetch
+            if (discoveryAbortController) {
+                discoveryAbortController.abort();
+                discoveryAbortController = null;
+            }
+            // 2. Stop polling
+            if (discoveryPollInterval) {
+                clearInterval(discoveryPollInterval);
+                discoveryPollInterval = null;
+            }
+            // 3. Reset state
+            discoveryJobId = null;
+            thirdPartyData = null;
+            thirdPartyLoading = false;
+            thirdPartyCacheChecked = true;
+
+            // 4. Show "wird abgebrochen" briefly
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p class="loading-text">Wird abgebrochen...</p>
+                </div>
+            `;
+
+            // 5. Clear backend cache created during scan
+            try {
+                const country = document.getElementById('country').value;
+                await fetch(`${API_BASE}/brand-discovery`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ brand: selectedPageName, country, clear_cache: true })
+                });
+            } catch (e) { /* ignore */ }
+
+            // 6. Back to start screen
+            renderThirdParty();
+        }
+
         async function startDiscovery(forceRefresh = false) {
             thirdPartyData = null;
             thirdPartyLoading = true;
+            discoveryAbortController = new AbortController();
             const resultsEl = document.getElementById('results');
 
             resultsEl.innerHTML = `
@@ -3126,6 +3170,7 @@
                     <div class="spinner"></div>
                     <p class="loading-text">Brand Discovery für "${selectedPageName}"${forceRefresh ? ' (Force Refresh)' : ''}</p>
                     <p class="loading-subtext" id="discoveryProgress">Starte Pipeline...</p>
+                    <button class="btn-cancel" onclick="cancelDiscovery()" style="margin-top:16px;padding:8px 20px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:0.9rem;">Abbrechen</button>
                 </div>
             `;
 
@@ -3139,7 +3184,8 @@
                         country,
                         use_headless: true,
                         force_refresh: forceRefresh,
-                    })
+                    }),
+                    signal: discoveryAbortController?.signal,
                 });
 
                 const data = await response.json();
@@ -3191,6 +3237,7 @@
         async function startQuickDiscovery() {
             thirdPartyLoading = true;
             thirdPartyData = null;
+            discoveryAbortController = new AbortController();
             const resultsEl = document.getElementById('results');
 
             resultsEl.innerHTML = `
@@ -3198,6 +3245,7 @@
                     <div class="spinner"></div>
                     <p class="loading-text">Schnellsuche für "${selectedPageName}"</p>
                     <p class="loading-subtext" id="discoveryProgress">Starte Pipeline (Edge Function)...</p>
+                    <button class="btn-cancel" onclick="cancelDiscovery()" style="margin-top:16px;padding:8px 20px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:0.9rem;">Abbrechen</button>
                 </div>
             `;
 
@@ -3212,7 +3260,8 @@
                         use_headless: true,
                         mode: 'quick',
                         force_refresh: true,
-                    })
+                    }),
+                    signal: discoveryAbortController?.signal,
                 });
 
                 const data = await response.json();

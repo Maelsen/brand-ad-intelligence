@@ -1,0 +1,1522 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projekt Dokumentation | Brand Ad Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --cream: #FAF8F5;
+            --cream-dark: #F5F2ED;
+            --charcoal: #2D2D2D;
+            --charcoal-light: #4A4A4A;
+            --orange: #E85D04;
+            --orange-light: #FAA307;
+            --sage: #606C5D;
+            --border: #E5E2DD;
+            --blue: #2563EB;
+            --blue-light: #EFF6FF;
+            --green: #16A34A;
+            --green-light: #F0FDF4;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--cream);
+            color: var(--charcoal);
+            line-height: 1.7;
+            font-size: 14px;
+        }
+
+        .doc-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+        }
+
+        /* ===== PAGE SYSTEM ===== */
+        .page {
+            min-height: 1122px; /* A4 height at 96dpi */
+            padding: 50px 60px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .page-break {
+            page-break-after: always;
+            break-after: page;
+        }
+
+        /* ===== COVER PAGE ===== */
+        .cover-page {
+            justify-content: space-between;
+            min-height: 1122px;
+        }
+
+        .cover-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-bottom: 40px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .cover-sender h1 {
+            font-family: 'Fraunces', serif;
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--charcoal);
+            margin-bottom: 8px;
+        }
+
+        .cover-sender p {
+            font-size: 13px;
+            color: var(--charcoal-light);
+            line-height: 1.7;
+        }
+
+        .cover-badge {
+            text-align: right;
+        }
+
+        .cover-badge .label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--sage);
+            margin-bottom: 5px;
+        }
+
+        .cover-badge .number {
+            font-family: 'Fraunces', serif;
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--orange);
+        }
+
+        .cover-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            text-align: center;
+            padding: 60px 0;
+        }
+
+        .cover-title {
+            font-family: 'Fraunces', serif;
+            font-size: 42px;
+            font-weight: 700;
+            color: var(--charcoal);
+            margin-bottom: 16px;
+            line-height: 1.2;
+        }
+
+        .cover-subtitle {
+            font-family: 'Fraunces', serif;
+            font-size: 22px;
+            font-weight: 400;
+            color: var(--orange);
+            margin-bottom: 50px;
+        }
+
+        .cover-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .cover-meta-item {
+            padding: 20px;
+            background: var(--cream);
+            border-radius: 8px;
+            text-align: left;
+        }
+
+        .cover-meta-item .label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--sage);
+            margin-bottom: 5px;
+        }
+
+        .cover-meta-item .value {
+            font-family: 'Fraunces', serif;
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .cover-footer {
+            padding-top: 30px;
+            border-top: 1px solid var(--border);
+            text-align: center;
+        }
+
+        .cover-footer p {
+            font-size: 13px;
+            color: var(--charcoal-light);
+        }
+
+        /* ===== CONTENT PAGES ===== */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 30px;
+        }
+
+        .page-header .page-title {
+            font-family: 'Fraunces', serif;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--sage);
+        }
+
+        .page-header .page-number {
+            font-family: 'Fraunces', serif;
+            font-size: 13px;
+            color: var(--orange);
+            font-weight: 600;
+        }
+
+        .section-title {
+            font-family: 'Fraunces', serif;
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--charcoal);
+            margin-bottom: 8px;
+            line-height: 1.3;
+        }
+
+        .section-subtitle {
+            font-size: 15px;
+            color: var(--charcoal-light);
+            margin-bottom: 30px;
+        }
+
+        .section-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--sage);
+            margin-bottom: 12px;
+        }
+
+        .content-text {
+            font-size: 14px;
+            line-height: 1.8;
+            color: var(--charcoal);
+            margin-bottom: 20px;
+        }
+
+        .content-text strong {
+            font-weight: 600;
+        }
+
+        /* ===== STATS GRID ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            padding: 20px 16px;
+            background: var(--cream);
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-card .stat-value {
+            font-family: 'Fraunces', serif;
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--orange);
+            margin-bottom: 4px;
+        }
+
+        .stat-card .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--sage);
+            line-height: 1.4;
+        }
+
+        /* ===== INFO BLOCKS ===== */
+        .info-block {
+            padding: 20px;
+            background: var(--cream);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .info-block h4 {
+            font-family: 'Fraunces', serif;
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .info-block p {
+            font-size: 13px;
+            color: var(--charcoal-light);
+            line-height: 1.7;
+        }
+
+        .info-block-highlight {
+            border-left: 3px solid var(--orange);
+        }
+
+        .info-block-blue {
+            background: var(--blue-light);
+            border-left: 3px solid var(--blue);
+        }
+
+        .info-block-green {
+            background: var(--green-light);
+            border-left: 3px solid var(--green);
+        }
+
+        /* ===== STEP LIST ===== */
+        .step-list {
+            list-style: none;
+            margin-bottom: 25px;
+        }
+
+        .step-list li {
+            display: flex;
+            gap: 15px;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .step-list li:last-child {
+            border-bottom: none;
+        }
+
+        .step-number {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            background: var(--orange);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        .step-number.step-sub {
+            background: var(--sage);
+            font-size: 10px;
+            width: 28px;
+            height: 28px;
+        }
+
+        .step-content h4 {
+            font-family: 'Fraunces', serif;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .step-content p {
+            font-size: 13px;
+            color: var(--charcoal-light);
+            line-height: 1.6;
+        }
+
+        /* ===== TABLES ===== */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 25px;
+            font-size: 13px;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 12px 15px;
+            background: var(--charcoal);
+            color: white;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .data-table th:first-child {
+            border-radius: 8px 0 0 0;
+        }
+
+        .data-table th:last-child {
+            border-radius: 0 8px 0 0;
+        }
+
+        .data-table td {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+
+        .data-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .data-table tr:nth-child(even) {
+            background: var(--cream);
+        }
+
+        .data-table .cost {
+            font-family: 'Fraunces', serif;
+            font-weight: 600;
+            color: var(--orange);
+            white-space: nowrap;
+        }
+
+        .data-table .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .tag-free {
+            background: var(--green-light);
+            color: var(--green);
+        }
+
+        .tag-paid {
+            background: #FEF3C7;
+            color: #D97706;
+        }
+
+        .tag-client {
+            background: var(--blue-light);
+            color: var(--blue);
+        }
+
+        /* ===== TWO COLUMN ===== */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        /* ===== FLOW DIAGRAM ===== */
+        .flow-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 25px 0;
+            flex-wrap: wrap;
+        }
+
+        .flow-step {
+            padding: 10px 16px;
+            background: var(--cream);
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+            min-width: 100px;
+        }
+
+        .flow-step.active {
+            background: var(--orange);
+            color: white;
+        }
+
+        .flow-step.highlight {
+            background: var(--charcoal);
+            color: white;
+        }
+
+        .flow-arrow {
+            font-size: 18px;
+            color: var(--sage);
+        }
+
+        /* ===== CHECK METHODS ===== */
+        .check-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+
+        .check-card {
+            padding: 14px;
+            background: var(--cream);
+            border-radius: 8px;
+            border-left: 3px solid var(--orange);
+        }
+
+        .check-card h5 {
+            font-family: 'Fraunces', serif;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .check-card p {
+            font-size: 12px;
+            color: var(--charcoal-light);
+            line-height: 1.5;
+        }
+
+        /* ===== FEATURE LIST ===== */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .feature-item {
+            display: flex;
+            gap: 12px;
+            padding: 15px;
+            background: var(--cream);
+            border-radius: 8px;
+        }
+
+        .feature-icon {
+            flex-shrink: 0;
+            width: 36px;
+            height: 36px;
+            background: var(--orange);
+            color: white;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .feature-item h5 {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+
+        .feature-item p {
+            font-size: 12px;
+            color: var(--charcoal-light);
+            line-height: 1.5;
+        }
+
+        /* ===== SUMMARY BOX ===== */
+        .summary-box {
+            padding: 30px;
+            background: var(--charcoal);
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 25px;
+        }
+
+        .summary-box h3 {
+            font-family: 'Fraunces', serif;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .summary-box p {
+            font-size: 14px;
+            opacity: 0.85;
+            line-height: 1.8;
+        }
+
+        .summary-box .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .summary-box .summary-stat {
+            text-align: center;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+        }
+
+        .summary-box .summary-stat .val {
+            font-family: 'Fraunces', serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--orange-light);
+        }
+
+        .summary-box .summary-stat .lbl {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        /* ===== FOOTER ===== */
+        .doc-footer {
+            padding: 30px 60px;
+            background: var(--charcoal);
+            color: white;
+            text-align: center;
+        }
+
+        .doc-footer p {
+            font-size: 13px;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .doc-footer .sub {
+            font-size: 12px;
+            opacity: 0.6;
+        }
+
+        /* ===== PRINT STYLES ===== */
+        @media print {
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
+            body {
+                background: white;
+                font-size: 12px;
+            }
+
+            .doc-container {
+                max-width: 100%;
+            }
+
+            .page {
+                min-height: auto;
+                height: auto;
+                padding: 30px 40px;
+                page-break-inside: avoid;
+            }
+
+            .page-break {
+                page-break-after: always;
+                break-after: page;
+            }
+
+            .cover-page {
+                height: 100vh;
+                min-height: 100vh;
+            }
+
+            .cover-title {
+                font-size: 36px;
+            }
+
+            .cover-subtitle {
+                font-size: 18px;
+            }
+
+            .section-title {
+                font-size: 22px;
+            }
+
+            .stat-card .stat-value {
+                font-size: 22px;
+            }
+
+            .stats-grid {
+                gap: 10px;
+            }
+
+            .stat-card {
+                padding: 14px 10px;
+            }
+
+            .data-table {
+                font-size: 11px;
+            }
+
+            .data-table th, .data-table td {
+                padding: 7px 10px;
+            }
+
+            .check-card {
+                padding: 10px;
+            }
+
+            .check-card h5 {
+                font-size: 12px;
+            }
+
+            .check-card p {
+                font-size: 10px;
+            }
+
+            .step-list li {
+                padding: 10px 0;
+            }
+
+            .step-content h4 {
+                font-size: 13px;
+            }
+
+            .step-content p {
+                font-size: 11px;
+            }
+
+            .content-text {
+                font-size: 12px;
+            }
+
+            .info-block p {
+                font-size: 11px;
+            }
+
+            .summary-box {
+                padding: 20px;
+            }
+
+            .doc-footer {
+                padding: 20px 40px;
+            }
+
+            @page {
+                margin: 0;
+                size: A4;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="doc-container">
+
+        <!-- ==================== SEITE 1: DECKBLATT ==================== -->
+        <div class="page cover-page page-break">
+            <div class="cover-header">
+                <div class="cover-sender">
+                    <h1>Marlin Wiethüchter</h1>
+                    <p>
+                        Industriestraße 27<br>
+                        74927 Eschelbronn<br>
+                        <br>
+                        E-Mail: info@ezeyflow.com
+                    </p>
+                </div>
+                <div class="cover-badge">
+                    <div class="label">Dokumentation</div>
+                    <div class="number">2026-DOK</div>
+                </div>
+            </div>
+
+            <div class="cover-content">
+                <div class="cover-title">Projekt Dokumentation</div>
+                <div class="cover-subtitle">Brand Ad Intelligence System</div>
+
+                <div class="cover-meta">
+                    <div class="cover-meta-item">
+                        <div class="label">Erstellt für</div>
+                        <div class="value">MetaFlow Food GmbH</div>
+                    </div>
+                    <div class="cover-meta-item">
+                        <div class="label">Ansprechpartner</div>
+                        <div class="value">Alon Colman Lerner</div>
+                    </div>
+                    <div class="cover-meta-item">
+                        <div class="label">Datum</div>
+                        <div class="value">Februar 2026</div>
+                    </div>
+                    <div class="cover-meta-item">
+                        <div class="label">Version</div>
+                        <div class="value">1.0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cover-footer">
+                <p>Brand Ad Intelligence — Automatisierte Analyse von Meta Werbeanzeigen</p>
+            </div>
+        </div>
+
+        <!-- ==================== SEITE 2: ÜBERBLICK ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 2</span>
+            </div>
+
+            <div class="section-title">Was macht das System?</div>
+            <div class="section-subtitle">Ein Überblick über das gesamte Projekt</div>
+
+            <p class="content-text">
+                Das Brand Ad Intelligence System ist ein Tool das automatisch alle Facebook und Instagram Werbeanzeigen einer Brand findet und analysiert. Du gibst einfach einen Markennamen ein und das System zeigt dir alle Anzeigen die diese Brand aktuell schaltet, welche Domains sie benutzen, wie ihre Zielgruppe aussieht und sogar welche Bilder und Videos in den Ads verwendet werden.
+            </p>
+
+            <p class="content-text">
+                Aber das eigentlich Besondere ist der <strong>Drittseiten Finder</strong>. Der geht noch einen Schritt weiter und findet alle anderen Facebook Seiten die für eine bestimmte Brand werben. Das sind zum Beispiel Affiliates, Presell Pages oder Reseller. Diese Seiten verlinken oft über Umwege auf den eigentlichen Shop und sind extrem schwer zu finden weil sie meistens komplett andere Namen haben als die Brand selbst.
+            </p>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">15</div>
+                    <div class="stat-label">Server Funktionen</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">2</div>
+                    <div class="stat-label">VPS Server</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">6</div>
+                    <div class="stat-label">Externe Services</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">14+</div>
+                    <div class="stat-label">Pipeline Schritte</div>
+                </div>
+            </div>
+
+            <div class="section-label">So funktioniert es</div>
+
+            <div class="flow-container">
+                <div class="flow-step">Brand Name<br>eingeben</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step">Facebook Page<br>auswählen</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step active">Alle Ads<br>laden</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step">Ergebnisse<br>anschauen</div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-step highlight">Drittseiten<br>finden</div>
+            </div>
+
+            <div class="info-block info-block-highlight">
+                <h4>Zwei Hauptteile</h4>
+                <p>
+                    <strong>Teil 1 (Brand Search):</strong> Findet alle Ads einer Brand, zeigt Domains, Landing Pages, Demografie und Ad Creatives (Bilder/Videos). Ergebnisse werden 90 Tage gecacht, also beim zweiten Mal laden sie sofort.<br><br>
+                    <strong>Teil 2 (Drittseiten Finder):</strong>Sucht automatisch nach allen Facebook Seiten die irgendwie mit der Brand verbunden sind. Dabei werden tausende Anzeigen durchsucht, hunderte Domains gecheckt und Verbindungen über mehrere Weiterleitungen verfolgt.
+                </p>
+            </div>
+
+        </div>
+
+        <!-- ==================== SEITE 3: TEIL 1 — BRAND SEARCH ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 3</span>
+            </div>
+
+            <div class="section-title">Teil 1 — Brand Search</div>
+            <div class="section-subtitle">So werden alle Werbeanzeigen einer Brand gefunden</div>
+
+            <p class="content-text">
+                Wenn du einen Markennamen eingibst, passiert im Hintergrund ziemlich viel. Das System schickt eine Anfrage an Meta Ad Library. Dort sind alle Werbeanzeigen gespeichert die jemals in der EU geschaltet wurden.
+            </p>
+
+            <div class="section-label">Was passiert Schritt für Schritt</div>
+
+            <ul class="step-list">
+                <li>
+                    <span class="step-number">1</span>
+                    <div class="step-content">
+                        <h4>Facebook Pages suchen</h4>
+                        <p>Das System sucht in der Meta Ad Library nach Facebook Seiten die zum eingegebenen Markennamen passen. Es werden verschiedene Suchvarianten ausprobiert (genauer Name, Domain, Varianten) um die richtige Seite zu finden.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">2</span>
+                    <div class="step-content">
+                        <h4>Page auswählen</h4>
+                        <p>Dir werden alle gefundenen Seiten angezeigt und du wählst die richtige aus. Das System zeigt dir wie viele Ads die Seite hat und andere Details damit du die richtige erkennst.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">3</span>
+                    <div class="step-content">
+                        <h4>Alle Anzeigen laden</h4>
+                        <p>Jetzt werden alle Werbeanzeigen dieser Seite geladen. Das können locker über 2.000 Ads sein. Von jeder Anzeige werden die wichtigsten Infos extrahiert: Texte, Bilder, Videos, Reichweite, Status, verlinkte Domains und Zielgruppen Daten.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">4</span>
+                    <div class="step-content">
+                        <h4>Domains und Landing Pages</h4>
+                        <p>Aus den Ads werden alle verlinkten Websites rausgezogen. Das System schaut sich die tatsächlichen URLs an, nicht nur die angezeigten Domains. Dafür werden die Facebook Ad Snapshots im Hintergrund gerendert und die echten Links extrahiert.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">5</span>
+                    <div class="step-content">
+                        <h4>Demografie Daten sammeln</h4>
+                        <p>Facebook gibt zu jeder Anzeige Infos über die Zielgruppe: Geschlecht, Altersgruppen und Länder. Das System sammelt all diese Daten zusammen und zeigt dir ein Gesamtbild der Werbestrategie.</p>
+                    </div>
+                </li>
+            </ul>
+
+            <div class="two-col">
+                <div class="info-block info-block-green">
+                    <h4>Ad Preview System</h4>
+                    <p>Das System öffnet die Facebook Ad Snapshots automatisch in einem Browser im Hintergrund und extrahiert die Bilder und Videos aus den Anzeigen. Das passiert mit einem echten Browser der auf dem Server läuft. So kannst du die Creatives direkt im Tool anschauen ohne auf Facebook gehen zu müssen.</p>
+                </div>
+                <div class="info-block info-block-blue">
+                    <h4>Intelligentes Caching</h4>
+                    <p>Ergebnisse werden 90 Tage gespeichert. Wenn du die gleiche Brand nochmal suchst, laden die Daten sofort aus dem Cache statt nochmal alle APIs abzufragen. Das spart Zeit und Kosten. Der Cache kann jederzeit manuell gelöscht werden wenn man frische Daten braucht.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== SEITE 4: TEIL 2 — DRITTSEITEN ÜBERSICHT ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 4</span>
+            </div>
+
+            <div class="section-title">Teil 2 — Der Drittseiten Finder</div>
+            <div class="section-subtitle"></div>
+
+
+
+        
+
+        <!-- ==================== SEITE 5: PIPELINE DETAIL 1 ==================== -->
+
+
+            <div class="section-title">Pipeline im Detail</div>
+            <div class="section-subtitle">Schritte 2 bis 4: Brand finden, Keywords generieren, Werbetreibende suchen</div>
+
+            <div class="section-label">Step 2 — Brand Domain ermitteln</div>
+            <p class="content-text">
+                Zuerst muss das System rausfinden welche Domain zur Brand gehört. Dafür wird der Markenname in der Meta Ad Library gesucht. Das System probiert verschiedene Suchvarianten: den genauen Namen, die Domain (z.B. glow25.de), und Kombinationen davon. Aus den gefundenen Ads wird die Domain extrahiert die am häufigsten vorkommt. Das ist dann die offizielle Brand Domain.
+            </p>
+            <p class="content-text">
+                Gleichzeitig checkt das System ob der Shop auf Shopify läuft. Dafür gibt es einen kostenlosen Trick: Shopify Shops haben eine versteckte Seite unter /products.json die alle Produkte und den Vendor Namen enthält. Das funktioniert sogar bei privaten Shops.
+            </p>
+
+            <div class="section-label" style="margin-top: 15px;">Step 2a bis 2c — Zusätzliche Signale sammeln</div>
+
+            <ul class="step-list">
+                <li>
+                    <span class="step-number step-sub">2a</span>
+                    <div class="step-content">
+                        <h4>Domain als Keyword suchen</h4>
+                        <p>Die Brand Domain wird als Suchbegriff verwendet um weitere Ads zu finden die diese Domain erwähnen. So werden auch Anzeigen gefunden die nicht direkt von der offiziellen Brand Seite kommen aber trotzdem die Domain verlinken.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number step-sub">2b</span>
+                    <div class="step-content">
+                        <h4>Priority Candidates identifizieren</h4>
+                        <p>Seiten die in den Brand Ads auftauchen und zur Brand Domain verlinken werden als Priorität markiert. Die werden später bevorzugt gecheckt.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number step-sub">2c</span>
+                    <div class="step-content">
+                        <h4>Ad Previews extrahieren</h4>
+                        <p>Ein echter Browser auf dem Server öffnet die Facebook Ad Snapshots und extrahiert die Bilder und Videos. Das passiert einzeln (nicht parallel) weil Facebook Seiten den Browser oft zum Abstürzen bringen. Erfolgsrate liegt bei ca. 80%.</p>
+                    </div>
+                </li>
+            </ul>
+
+            <div class="section-label">Step 3 — Keywords automatisch generieren</div>
+            <p class="content-text">
+                Das System liest alle Texte aus den Brand Ads (Überschriften, Beschreibungen, Call-to-Actions) und extrahiert daraus automatisch relevante Suchbegriffe. Zum Beispiel bei einer Kollagen Brand werden Keywords wie "Kollagen Pulver", "Hyaluron" oder "Anti Aging" gefunden.
+            </p>
+            <p class="content-text">
+                Diese Keywords werden dann an eine KI (OpenAI) geschickt die sie verfeinert. Die KI bekommt einen deutschen Prompt und gibt Nischen Keywords zurück die noch spezifischer sind. Das verbessert die Qualität der Suche um das 3 bis 5 fache.
+            </p>
+
+            <div class="section-label">Step 4 — Alle Werbetreibenden suchen</div>
+            <p class="content-text">
+                Mit den generierten Keywords wird jetzt die Meta Ad Library nochmal durchsucht. Aber diesmal nicht nach einer bestimmten Brand, sondern nach ALLEN Facebook Seiten die diese Keywords benutzen. Pro Keyword kommen ca. 300 Anzeigen rein. Bei 5 Keywords sind das schon 1.500 Ads von hunderten verschiedenen Facebook Seiten. Irgendwo darunter verstecken sich die Drittseiten.
+            </p>
+
+            <div class="info-block info-block-highlight">
+               
+            </div>
+        </div>
+
+        <!-- ==================== SEITE 6: PIPELINE DETAIL 2 ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 6</span>
+            </div>
+
+            <div class="section-title">Pipeline im Detail</div>
+            <div class="section-subtitle">Schritte 5 bis 7: Domains checken und Ergebnis bauen</div>
+
+            <div class="section-label">Step 5 — Domains extrahieren und URLs finden</div>
+            <p class="content-text">
+                Aus den tausenden gefundenen Ads werden jetzt alle einzigartigen Domains rausgefiltert. 3.000 Ads haben oft nur etwa 150 verschiedene Domains weil viele Ads die gleiche Website verlinken. Für jede Domain wird dann die echte Landing Page URL extrahiert. Das geht nicht einfach über die Ads selbst weil Facebook nur die Domain anzeigt. Um die echte URL zu bekommen muss das System die Ad Snapshots in einem Browser öffnen und dort den Facebook Weiterleitungs Link extrahieren.
+            </p>
+
+            <div class="section-label">Step 6 — Domain Verifizierung (der wichtigste Schritt)</div>
+            <p class="content-text">
+                Das ist der Kern des ganzen Systems. Jede einzelne Domain wird gecheckt ob sie wirklich zur Brand führt. Das passiert mit 12 parallelen Prüfungen gleichzeitig und insgesamt 7 verschiedenen Check Methoden:
+            </p>
+
+            <div class="check-grid">
+                <div class="check-card">
+                    <h5>Direct Match</h5>
+                    <p>Die Domain passt direkt zur Brand Domain (z.B. shop.vitafant.com = vitafant.com).</p>
+                </div>
+                <div class="check-card">
+                    <h5>Redirect Check</h5>
+                    <p>Die Domain leitet automatisch zur Brand Domain weiter. Das System folgt allen Weiterleitungen.</p>
+                </div>
+                <div class="check-card">
+                    <h5>Presell CTA Check</h5>
+                    <p>Die Seite hat einen "Jetzt kaufen" Button der zur Brand führt. Das System findet Buttons auf der Seite und schaut wohin sie verlinken.</p>
+                </div>
+                <div class="check-card">
+                    <h5>Checkout Erkennung</h5>
+                    <p>Der Link führt zu einer Checkout Seite auf der der Brand Name steht. Funktioniert auch wenn die URL anders aussieht.</p>
+                </div>
+                <div class="check-card">
+                    <h5>Shopify Vendor Check</h5>
+                    <p>Bei Shopify Shops wird die /products.json Seite abgefragt und der Vendor Name verglichen.</p>
+                </div>
+                <div class="check-card">
+                    <h5>Deep CTA Ketten</h5>
+                    <p>Das System folgt CTA Buttons über bis zu 5 Weiterleitungen. So werden auch Presell Seiten gefunden die über mehrere Zwischenseiten zum Shop führen.</p>
+                </div>
+            </div>
+
+            <div class="info-block info-block-highlight">
+             
+            </div>
+
+            <div class="section-label">Step 7 — Ergebnis zusammenbauen</div>
+            <p class="content-text">
+                Am Ende werden alle verifizierten Matches zusammengebaut. Jede bestätigte Drittseite bekommt einen Typ zugewiesen (Redirect, Presell, Checkout Match, etc.) und eine Konfidenz Bewertung. Die Domains werden kategorisiert in Presell Seiten, Redirect Domains und Shop Domains. Ausserdem werden die Demografie Daten aggregiert und die Presell Ketten visualisiert, also welche Presell Seite über welchen Weg zum Shop führt.
+            </p>
+
+            <div class="info-block">
+                <h4>Spam Filter</h4>
+                <p>
+                    Bevor Domains überhaupt gecheckt werden, filtert das System Spam raus. Domains die auf bekannte Muster passen (Casino, Adult Content, Malware) werden sofort aussortiert. Auch Facebook Seiten mit zufällig generierten Namen (typisch für Ad Farms) werden erkannt und ignoriert.
+                </p>
+            </div>
+        </div>
+
+        <!-- ==================== SEITE 7: TOOLS & KOSTEN ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 7</span>
+            </div>
+
+            <div class="section-title">Alle Tools und Services</div>
+            <div class="section-subtitle">Was benutzt wird, was es kostet und warum es gebraucht wird</div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th>Wofür</th>
+                        <th>Kosten</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Meta Ad Library API</strong></td>
+                        <td>Zugriff auf alle Facebook/Instagram Werbeanzeigen in der EU. Liefert Ads, Creatives, Domains, Reichweite und Demografie Daten.</td>
+                        <td><span class="tag tag-free">Kostenlos</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Supabase</strong> (Pro Plan)</td>
+                        <td>Datenbank und Server Funktionen. Speichert alle Cache Daten, Job Status und Brand Listen. Führt die 15 Server Funktionen aus.</td>
+                        <td class="cost">25 €/Monat</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ScrapingBee</strong> (Freelancer)</td>
+                        <td>Rendert Webseiten in einem echten Browser. Wird gebraucht um CTA Buttons auf Presell Seiten zu finden und Weiterleitungs Ketten zu verfolgen. Ca. 5.000 bis 6.000 Aufrufe pro Brand Analyse.</td>
+                        <td class="cost">50 €/Monat</td>
+                    </tr>
+                    <tr>
+                        <td><strong>OpenAI</strong> (GPT-4o-mini)</td>
+                        <td>KI für die Keyword Generierung. Verfeinert automatisch extrahierte Suchbegriffe um bessere Ergebnisse zu bekommen. Minimaler Verbrauch pro Anfrage.</td>
+                        <td><span class="tag tag-free">Kostenlos</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>VPS Server 8GB</strong> (Hostinger)</td>
+                        <td>Der Worker Server für die Tiefensuche. Läuft ohne Zeitlimit, hat einen eigenen Browser installiert und verarbeitet die aufwendigen Discovery Jobs.</td>
+                        <td><span class="tag tag-client">Von Dir</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>VPS Server 4GB</strong> (Hetzner)</td>
+                        <td>Die Light Pipeline. Verarbeitet im Hintergrund automatisch eine Brand Liste und cacht die Ergebnisse vor damit sie sofort verfügbar sind.</td>
+                        <td><span class="tag tag-free">Kostenlos</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="section-label">API Key Rotation System</div>
+
+            <p class="content-text">
+                Das System unterstützt unbegrenzt viele Meta API Tokens gleichzeitig. Die Tokens werden intelligent rotiert damit keiner überlastet wird. So funktioniert das:
+            </p>
+
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <div class="feature-icon">%</div>
+                    <div>
+                        <h5>Auslastung tracken</h5>
+                        <p>Bei jeder Antwort von Facebook kommt eine Auslastungs Info mit. Das System liest die aus und weiss genau wie stark jeder Token belastet ist.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">↻</div>
+                    <div>
+                        <h5>Vorausschauend wechseln</h5>
+                        <p>Wenn ein Token 80% Auslastung erreicht, wechselt das System automatisch zum am wenigsten belasteten Token. Nicht erst wenn es zu spät ist.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">⏸</div>
+                    <div>
+                        <h5>Cooldown System</h5>
+                        <p>Wenn ein Token ein Limit erreicht, bekommt er 10 Minuten Pause. In der Zeit werden die anderen Tokens benutzt.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">⏱</div>
+                    <div>
+                        <h5>Adaptive Geschwindigkeit</h5>
+                        <p>Je nach Auslastung wartet das System zwischen 1 und 15 Sekunden zwischen den Anfragen. Bei niedriger Last geht es schneller, bei hoher bremst es automatisch.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-block info-block-blue">
+
+            </div>
+        </div>
+
+        <!-- ==================== SEITE 8: INFRASTRUKTUR ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 8</span>
+            </div>
+
+            <div class="section-title">Infrastruktur und Datenbank</div>
+            <div class="section-subtitle">Server, Funktionen, Datenbank und wie alles zusammenhängt</div>
+
+            <div class="section-label">Die zwei VPS Server</div>
+
+            <div class="two-col">
+                <div class="info-block info-block-highlight">
+                    <h4>Worker Server (8GB RAM)</h4>
+                    <p>
+                        Hostinger KVM 2 Server. Führt die Tiefensuche durch, hat einen eigenen Browser für Ad Previews und URL Extraction installiert. Kann Jobs pausieren, fortsetzen und abbrechen. Speichert Fortschritt in der Datenbank und kann nach einem Absturz automatisch weitermachen.
+                    </p>
+                </div>
+                <div class="info-block info-block-blue">
+                    <h4>Light Pipeline (4GB RAM)</h4>
+                    <p>
+                        Hetzner Server. Schaut alle 60 Sekunden in die Datenbank ob es neue Brands gibt die noch nicht gecacht sind. Wenn ja, holt er die Ads von der Meta API und speichert alles im Cache. Arbeitet komplett automatisch im Hintergrund.
+                    </p>
+                </div>
+            </div>
+
+            <div class="section-label">15 Server Funktionen</div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Funktion</th>
+                        <th>Was sie macht</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>brand-discovery</strong></td>
+                        <td>Startet die Drittseiten Suche. Checkt Cache, leitet an Worker weiter oder führt direkt aus.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>brand-search</strong></td>
+                        <td>Lädt alle Ads einer Facebook Seite mit Caching.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>page-search</strong></td>
+                        <td>Manuelle Brand Suche nach Facebook Pages.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>page-search-quick</strong></td>
+                        <td>Schnelle Suche in der Ad Library mit minimaler Verarbeitung.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>domains-mapping</strong></td>
+                        <td>Gibt die entdeckten Domains für eine Brand zurück.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>url-enrichment</strong></td>
+                        <td>Extrahiert echte Landing Page URLs aus Ad Snapshots.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>dismiss-page</strong></td>
+                        <td>Markiert eine Drittseite als Fehlalarm (False Positive).</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ad-preview</strong></td>
+                        <td>Liefert gecachte Ad Creatives (Bilder/Videos).</td>
+                    </tr>
+                    <tr>
+                        <td><strong>brand-cache-light</strong></td>
+                        <td>Leichtes Caching für die Brand Liste.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>pipeline-batch</strong></td>
+                        <td>Mehrere Brands gleichzeitig zur Discovery Warteschlange hinzufügen.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>pipeline-status</strong></td>
+                        <td>Zeigt den Status laufender Discovery Jobs an.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>light-batch-status</strong></td>
+                        <td>Status der Light Pipeline Jobs.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>brand-list</strong></td>
+                        <td>Verwaltung der Brand Liste.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>worker-control</strong></td>
+                        <td>Worker pausieren, fortsetzen oder Jobs abbrechen.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>token-test</strong></td>
+                        <td>Testet ob ein Meta API Token noch gültig ist.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ==================== SEITE 9: DATENBANK + CRASH SICHERHEIT ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 9</span>
+            </div>
+
+            <div class="section-title">Datenbank und Sicherheit</div>
+            <div class="section-subtitle">Welche Daten gespeichert werden und warum das System nicht abstürzen kann</div>
+
+            <div class="section-label">Datenbank Tabellen</div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Tabelle</th>
+                        <th>Was gespeichert wird</th>
+                        <th>Wie lange</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>page_ad_cache</strong></td>
+                        <td>Alle Ads einer Brand Seite mit Demografie Daten</td>
+                        <td>90 Tage</td>
+                    </tr>
+                    <tr>
+                        <td><strong>domain_mapping_cache</strong></td>
+                        <td>Komplettes Ergebnis der Drittseiten Suche</td>
+                        <td>7 Tage</td>
+                    </tr>
+                    <tr>
+                        <td><strong>full_url_cache</strong></td>
+                        <td>Extrahierte echte Landing Page URLs</td>
+                        <td>90 Tage</td>
+                    </tr>
+                    <tr>
+                        <td><strong>domain_check_cache</strong></td>
+                        <td>Ergebnis der Domain Verifizierung pro Brand</td>
+                        <td>90 Tage</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ad_preview_cache</strong></td>
+                        <td>Bild und Video URLs aus Ad Creatives</td>
+                        <td>7 Tage</td>
+                    </tr>
+                    <tr>
+                        <td><strong>discovery_jobs</strong></td>
+                        <td>Status und Fortschritt laufender Discovery Jobs</td>
+                        <td>Permanent</td>
+                    </tr>
+                    <tr>
+                        <td><strong>dismissed_pages</strong></td>
+                        <td>Manuell als Fehlalarm markierte Drittseiten</td>
+                        <td>Permanent</td>
+                    </tr>
+                    <tr>
+                        <td><strong>brand_list</strong></td>
+                        <td>Verwaltete Brand Liste mit Page IDs</td>
+                        <td>Permanent</td>
+                    </tr>
+                    <tr>
+                        <td><strong>light_batches</strong></td>
+                        <td>Batch Jobs der Light Pipeline</td>
+                        <td>Permanent</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="section-label">Crash Sicherheit und Auto Resume</div>
+
+            <p class="content-text">
+                Der Worker Server speichert seinen Fortschritt regelmässig in der Datenbank. Das heisst wenn der Server aus irgendeinem Grund abstürzt oder neugestartet wird, macht er genau da weiter wo er aufgehört hat. Die teuren Schritte (Browser Rendering, URL Extraction) müssen nicht wiederholt werden.
+            </p>
+
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <div class="feature-icon">💾</div>
+                    <div>
+                        <h5>Checkpoints</h5>
+                        <p>Nach jedem grossen Schritt und alle 10 Domains wird der aktuelle Stand in der Datenbank gespeichert.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🔄</div>
+                    <div>
+                        <h5>Auto Resume</h5>
+                        <p>Beim Neustart checkt der Server ob es unfertige Jobs gibt und setzt die automatisch fort.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">👁</div>
+                    <div>
+                        <h5>Watchdog</h5>
+                        <p>Ein Überwachungsprozess checkt alle 30 Sekunden ob der Worker noch Fortschritt macht. Bei 5 Minuten Stillstand wird er automatisch neugestartet.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🛡</div>
+                    <div>
+                        <h5>Fehlerbehandlung</h5>
+                        <p>Einzelne Abstürze (z.B. Browser crash bei einer Domain) werden abgefangen. Der Rest läuft normal weiter.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-block info-block-green">
+                <h7>Automatische Bereinigung</h1>
+                <p>
+                    Alle 6 Stunden räumt das System abgelaufene Cache Einträge auf. Das verhindert dass die Datenbank zu gross wird. Bei geschätzt 3 MB pro Brand und einem Limit von 8 GB können rund 2.500 Brands gleichzeitig im Cache gehalten werden.
+                </p>
+            </div>
+        </div>
+
+        <!-- ==================== SEITE 10: FRONTEND ==================== -->
+        <div class="page page-break">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 10</span>
+            </div>
+
+            <div class="section-title">Frontend und Benutzeroberfläche</div>
+            <div class="section-subtitle">Was der User sieht und machen kann</div>
+
+            <p class="content-text">
+                Das Frontend ist eine Web App die direkt im Browser läuft. Man braucht keine Installation. Die Oberfläche ist aufgeteilt in verschiedene Bereiche die über Tabs erreichbar sind.
+            </p>
+
+            <div class="section-label">Hauptbereiche</div>
+
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <div class="feature-icon">🔍</div>
+                    <div>
+                        <h5>Suchfeld</h5>
+                        <p>Brand Name eingeben und Facebook Pages werden gefunden. Länderauswahl für Deutschland, Österreich und Schweiz.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">📊</div>
+                    <div>
+                        <h5>Overview Tab</h5>
+                        <p>Zusammenfassung mit Gesamtzahlen, Top Domains, meistverlinkte Landing Pages und die neuesten Ads.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">📋</div>
+                    <div>
+                        <h5>Anzeigen Tab</h5>
+                        <p>Alle einzelnen Ads als Karten. Jede zeigt Bild/Video, Texte, Reichweite, Status und verlinkte Domain. Bis zu 50 Ads gleichzeitig.</p>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🌐</div>
+                    <div>
+                        <h5>Domains Tab</h5>
+                        <p>Liste aller Websites die in den Ads verlinkt werden. Jede Domain ist anklickbar.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-label">Drittseiten Bereich (nach der Suche)</div>
+
+            <p class="content-text">
+                Nach der Drittseiten Suche zeigt das System die Ergebnisse in mehreren Bereichen:
+            </p>
+
+            <ul class="step-list">
+                <li>
+                    <span class="step-number">1</span>
+                    <div class="step-content">
+                        <h4>Offizielle Pages</h4>
+                        <p>Die offiziellen Facebook Seiten der Brand mit grünem Häkchen, Seitenname, ID und Anzahl der Ads.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">2</span>
+                    <div class="step-content">
+                        <h4>Drittseiten / Affiliates</h4>
+                        <p>Alle gefundenen Drittseiten mit Verbindungstyp (Redirect, Presell, Checkout), Konfidenz in Prozent und den verwendeten Domains. Jede Seite kann als Fehlalarm markiert werden.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">3</span>
+                    <div class="step-content">
+                        <h4>Domain Kategorien</h4>
+                        <p>Domains aufgeteilt in Presell Seiten (Advertorials), Redirect Domains (Weiterleitungen) und Shop Domains (echte Shops). Jede Kategorie farblich markiert.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">4</span>
+                    <div class="step-content">
+                        <h4>Presell Ketten</h4>
+                        <p>Visuelle Darstellung wie Presell Seiten über CTA Buttons zum Shop führen. Jeder Schritt in der Kette wird als farbiger Block gezeigt mit einer Konfidenz Bewertung.</p>
+                    </div>
+                </li>
+            </ul>
+
+            <div class="two-col">
+                <div class="info-block">
+                    <h4>Live Tracking</h4>
+                    <p>Ein grüner Punkt im Header zeigt dass das Tool aktiv ist. Bei laufenden Suchen wird der Fortschritt in Echtzeit angezeigt mit einer Beschreibung welcher Schritt gerade läuft.</p>
+                </div>
+                <div class="info-block">
+                    <h4>Cache Verwaltung</h4>
+                    <p>Wenn Ergebnisse aus dem Cache kommen, zeigt ein "CACHED" Button das an. Mit einem Klick kann der Cache gelöscht werden um eine neue Suche zu starten.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== SEITE 11: ZUSAMMENFASSUNG ==================== -->
+        <div class="page">
+            <div class="page-header">
+                <span class="page-title">Brand Ad Intelligence</span>
+                <span class="page-number">Seite 11</span>
+            </div>
+
+            <div class="section-title">Zusammenfassung</div>
+            <div class="section-subtitle">Was das System besonders macht</div>
+
+            <div class="summary-box">
+                <h3>Das Gesamtbild</h3>
+                <p>
+                    Das Brand Ad Intelligence System ist ein vollständiges Analyse Werkzeug für Facebook und Instagram Werbeanzeigen. Es kombiniert mehrere externe Services, zwei dedizierte Server, eine intelligente Datenbank mit Caching und ein durchdachtes Frontend zu einem System das automatisch Brand Werbung analysiert und versteckte Werbe Netzwerke aufdeckt.
+                </p>
+                <div class="summary-stats">
+                    <div class="summary-stat">
+                        <div class="val">14+</div>
+                        <div class="lbl">Pipeline Schritte</div>
+                    </div>
+                    <div class="summary-stat">
+                        <div class="val">7</div>
+                        <div class="lbl">Check Methoden</div>
+                    </div>
+                    <div class="summary-stat">
+                        <div class="val">15</div>
+                        <div class="lbl">Server Funktionen</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-label">Was dieses Projekt besonders komplex macht</div>
+
+            <ul class="step-list">
+                <li>
+                    <span class="step-number">1</span>
+                    <div class="step-content">
+                        <h4>Multi Token Rotation</h4>
+                        <p>Unbegrenzt viele API Tokens die intelligent rotiert werden. Mit vorausschauendem Wechsel, Cooldown System und adaptiver Geschwindigkeit damit das System nie blockiert wird.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">2</span>
+                    <div class="step-content">
+                        <h4>Deep CTA Ketten</h4>
+                        <p>Das System folgt "Jetzt kaufen" Buttons über bis zu 5 Weiterleitungen. Das braucht einen echten Browser der jede Seite rendert und die Links extrahiert. So werden auch Verbindungen gefunden die komplett andere Namen haben als die Brand.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">3</span>
+                    <div class="step-content">
+                        <h4>Crash Resilientes System</h4>
+                        <p>Checkpoints in der Datenbank, automatisches Fortsetzen nach Abstürzen, Watchdog Überwachung. Der Worker kann jederzeit neugestartet werden ohne Daten zu verlieren.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">4</span>
+                    <div class="step-content">
+                        <h4>100% Precision bei der Verifizierung</h4>
+                        <p>7 verschiedene Methoden um eine Domain zu checken. Jeder Match wird durch eine echte URL Kette bewiesen. Keine Vermutungen, keine ungenauen Matches.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="step-number">5</span>
+                    <div class="step-content">
+                        <h4>KI gestützte Keyword Generierung</h4>
+                        <p>Automatische Extraktion von Suchbegriffen aus Brand Ads, verfeinert durch OpenAI. Das erweitert die Suche deutlich über den Brand Namen hinaus und findet Nischen Verbindungen.</p>
+                    </div>
+                </li>
+            </ul>
+
+            <div class="info-block info-block-highlight" style="margin-top: 10px;">
+                <h4>Laufende Kosten Übersicht</h4>
+                <p>
+                    <strong>Supabase Pro:</strong> 25 €/Monat &nbsp; | &nbsp;
+                    <strong>ScrapingBee:</strong> 50 €/Monat &nbsp; | &nbsp;
+                    <strong>Meta API:</strong> Kostenlos &nbsp; | &nbsp;
+                    <strong>OpenAI:</strong> Kostenlos &nbsp; | &nbsp;
+                    <strong>VPS Server:</strong> Vom Client
+                </p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="doc-footer">
+            <p>Vielen Dank für Ihr Vertrauen!</p>
+            <p class="sub">Brand Ad Intelligence — Erstellt von Marlin Wiethüchter | Februar 2026</p>
+        </footer>
+
+    </div>
+</body>
+</html>

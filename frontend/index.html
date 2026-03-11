@@ -991,6 +991,37 @@
             height: 16px;
         }
 
+        /* Ad Creative Preview */
+        .ad-preview {
+            width: 100%;
+            border-radius: var(--radius-md);
+            margin-bottom: 14px;
+            overflow: hidden;
+            background: var(--bg-subtle);
+        }
+
+        .ad-preview img {
+            width: 100%;
+            display: block;
+            object-fit: cover;
+            max-height: 400px;
+        }
+
+        .ad-preview video {
+            width: 100%;
+            display: block;
+            max-height: 400px;
+        }
+
+        .ad-preview-loading {
+            height: 180px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
         /* Loading State */
         .loading {
             display: flex;
@@ -2626,6 +2657,8 @@
                 case 'domains': renderDomains(); break;
                 case 'thirdparty': renderThirdParty(); break;
             }
+            // Load ad creative previews after DOM update
+            setTimeout(() => loadAdPreviews(), 100);
         }
 
         function renderOverview() {
@@ -2914,6 +2947,7 @@
                             <span class="ad-status ${ad.status}">${ad.status === 'active' ? 'Aktiv' : 'Inaktiv'}</span>
                         </div>
                     </div>
+                    ${ad.id ? `<div class="ad-preview" data-ad-id="${ad.id}"><div class="ad-preview-loading">Vorschau wird geladen...</div></div>` : ''}
                     ${ad.headline ? `<div class="ad-headline">${ad.headline}</div>` : ''}
                     <div class="ad-text">${ad.primary_text || 'Kein Text verfügbar'}</div>
                     <div class="ad-meta">
@@ -2962,6 +2996,47 @@
                     </div>
                 </div>
             `;
+        }
+
+        // Ad Creative Preview Loading (batch by ad_ids from cache)
+        function loadAdPreviews() {
+            const previewDivs = document.querySelectorAll('.ad-preview[data-ad-id]');
+            if (!previewDivs.length) return;
+
+            // Collect all ad_ids that need loading
+            const adIds = [];
+            const divMap = new Map();
+            previewDivs.forEach(div => {
+                if (div.dataset.adId && !div.dataset.loaded) {
+                    adIds.push(div.dataset.adId);
+                    divMap.set(div.dataset.adId, div);
+                }
+            });
+            if (!adIds.length) return;
+
+            // Single batch request for all visible ads (max 50)
+            fetch(`${API_BASE}/ad-preview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ad_ids: adIds.slice(0, 50) })
+            })
+            .then(r => r.json())
+            .then(data => {
+                previewDivs.forEach(div => {
+                    const preview = data.previews?.[div.dataset.adId];
+                    if (preview?.video_url) {
+                        div.innerHTML = `<video src="${preview.video_url}" controls muted preload="metadata" poster="${preview.image_url || ''}"></video>`;
+                    } else if (preview?.image_url) {
+                        div.innerHTML = `<img src="${preview.image_url}" loading="lazy" alt="Ad Preview" onerror="this.parentElement.style.display='none'">`;
+                    } else {
+                        div.style.display = 'none'; // Not cached → hide
+                    }
+                    div.dataset.loaded = 'true';
+                });
+            })
+            .catch(() => {
+                previewDivs.forEach(d => d.style.display = 'none');
+            });
         }
 
         function renderDomains() {
@@ -3503,8 +3578,6 @@
                                 const connectionLabels = {
                                     'redirect': 'Redirect',
                                     'redirect_match': 'Redirect',
-                                    'shopify_vendor': 'Shopify',
-                                    'shopify_vendor_match': 'Shopify',
                                     'checkout_match': 'Checkout',
                                     'presell_cta': 'Presell CTA',
                                     'domain_match': 'Domain',
@@ -3571,7 +3644,7 @@
                                     const matchInfo = domainMatchInfo[d];
                                     const matchLabels = {
                                         'redirect': 'Redirect', 'redirect_match': 'Redirect',
-                                        'shopify_vendor': 'Shopify', 'checkout_match': 'Checkout',
+                                        'checkout_match': 'Checkout',
                                         'presell_cta': 'Presell CTA', 'domain_match': 'Domain',
                                         'content_match': 'Content', 'content_link': 'Link',
                                         'direct': 'Direct',

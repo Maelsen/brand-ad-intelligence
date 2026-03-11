@@ -22,22 +22,74 @@ import {
   ThirdPartyPageInfo,
   PageInfo,
   LandingPageInfo,
+  ProcessedAd,
+  DemographicsData,
 } from './types.ts';
 import { MetaAdLibraryClient } from './meta-api.ts';
-import { detectShopifyStore, shopifyStoreHasVendor } from './shopify-detector.ts';
+import { detectShopifyStore } from './shopify-detector.ts';
 import { generateKeywords, refineKeywordsWithAI } from './keyword-generator.ts';
 import { trackPresellChain } from './presell-tracker.ts';
-import { extractDomainFromCaption, extractFullUrlFromCaption, extractLandingPageUrl } from './url-extractor.ts';
+import { extractDomainFromCaption, extractFullUrlFromCaption, extractDomainsFromCaptions, extractLandingPageUrl, formatReach } from './url-extractor.ts';
 import { scrapeWithHeadless } from './headless-scraper.ts';
 import { detectBrandFromCheckout } from './checkout-detector.ts';
+import { deepCTAChainFollow } from './deep-cta-tracker.ts';
+import { quickAIVerify } from './ai-brand-verifier.ts';
+
+// ============================================
+// Demographics Helper
+// ============================================
+
+function aggregateDemographicsFromAds(ads: MetaAd[]): DemographicsData | undefined {
+  let totalMale = 0, totalFemale = 0, totalUnknown = 0;
+  const ageMap: Record<string, number> = {};
+  const countryMap: Record<string, number> = {};
+  let totalSample = 0;
+
+  for (const ad of ads) {
+    const breakdown = ad.age_country_gender_reach_breakdown;
+    if (!breakdown || !Array.isArray(breakdown)) continue;
+    // Real API: [{country: "DE", age_gender_breakdowns: [{age_range, male?, female?, unknown?}]}]
+    for (const countryEntry of breakdown) {
+      const country = countryEntry.country || 'unknown';
+      const ageBreakdowns = countryEntry.age_gender_breakdowns;
+      if (!ageBreakdowns || !Array.isArray(ageBreakdowns)) continue;
+      for (const ageEntry of ageBreakdowns) {
+        const male = ageEntry.male || 0;
+        const female = ageEntry.female || 0;
+        const unknown = ageEntry.unknown || 0;
+        const entryTotal = male + female + unknown;
+        totalMale += male; totalFemale += female; totalUnknown += unknown;
+        totalSample += entryTotal;
+        ageMap[ageEntry.age_range || 'unknown'] = (ageMap[ageEntry.age_range || 'unknown'] || 0) + entryTotal;
+        countryMap[country] = (countryMap[country] || 0) + entryTotal;
+      }
+    }
+  }
+  if (totalSample === 0) return undefined;
+  const genderTotal = totalMale + totalFemale + totalUnknown;
+  return {
+    gender: {
+      male: Math.round((totalMale / genderTotal) * 100),
+      female: Math.round((totalFemale / genderTotal) * 100),
+      unknown: Math.round((totalUnknown / genderTotal) * 100),
+    },
+    age_groups: Object.entries(ageMap).sort(([a], [b]) => a.localeCompare(b)).map(([group, reach]) => ({
+      group, pct: Math.round((reach / totalSample) * 100),
+    })),
+    countries: Object.entries(countryMap).sort(([, a], [, b]) => b - a).map(([country, reach]) => ({
+      country, reach, pct: Math.round((reach / totalSample) * 100),
+    })),
+    total_sample: totalSample,
+  };
+}
 
 // ============================================
 // Configuration
 // ============================================
 
-const DOMAIN_CHECK_CONCURRENCY = 5;
+const DOMAIN_CHECK_CONCURRENCY = 12;  // Reduced from 15 — crash cascades at 15 tabs
 const DOMAIN_CHECK_TIMEOUT = 12000;
-const META_API_DELAY_MS = 300;       // Between API calls (rate limit protection)
+const META_API_DELAY_MS = 2000;      // Between keyword API calls (adaptive pacing for rate limits)
 const MAX_ADS_PER_KEYWORD = 500;
 const MAX_KEYWORDS = 10;
 
@@ -80,12 +132,18 @@ interface DiscoveryOptions {
   max_brand_ads?: number;      // Limit for brand search + domain search (default 1100)
   max_domains_to_check?: number; // Max domains to brand-check in Step 6 (default 20)
   use_headless?: boolean;
-  use_headless_for_domains?: boolean; // ScrapingBee for domain checks (default: false in edge fn)
-  access_token: string;
-  scrapingbee_key?: string;
+  use_headless_for_domains?: boolean; // Headless for domain checks (default: false in edge fn)
+  page_id?: string;            // Facebook page_id — fetch ads directly from this page (skip keyword guessing)
+  deep_cta_enabled?: boolean;  // Enable deep CTA chain following (Worker-only, default: false)
+  access_token?: string;          // Single token (backward compat for Edge Functions)
+  access_tokens?: string[];       // Multiple tokens for rotation (Worker)
   openai_key?: string;         // For AI keyword refinement
   timeout_ms?: number;
   onProgress?: (step: string, detail: string) => void;
+  // Checkpoint/Resume support (Worker-only)
+  supabase?: any;              // SupabaseClient for caching intermediate results
+  onCheckpoint?: (data: { step: string; detail: string; matches_so_far?: number }) => void;
+  resumeCheckpoint?: Record<string, unknown> | null; // Skip completed steps on resume
 }
 
 // ============================================
@@ -114,8 +172,10 @@ export async function discoverBrand(
     return Date.now() > (deadline - bufferMs);
   }
 
+  const tokens = options.access_tokens || (options.access_token ? [options.access_token] : []);
   const metaClient = new MetaAdLibraryClient({
-    access_token: options.access_token,
+    access_tokens: tokens,
+    wait_for_rate_limit: !hasDeadline, // Worker mode: wait forever on rate limits; Edge Function: throw after 3 rounds
   });
 
   const detectionMethods: Record<string, number> = {};
@@ -129,14 +189,29 @@ export async function discoverBrand(
 
     // Fetch brand ads ONCE — used for Steps 2, 2b, and 3
     const brandSearchLimit = options.max_brand_ads ? Math.min(options.max_brand_ads, 300) : 300;
-    const brandAds = await metaClient.fetchAllAds({
-      search_terms: brandName,
-      ad_reached_countries: countries,
-      search_type: 'KEYWORD_EXACT_PHRASE',
-      max_results: brandSearchLimit,
-    });
+    let brandAds: MetaAd[];
 
-    const brandInfo = await findBrandDomain(brandName, brandAds);
+    if (options.page_id) {
+      // page_id known (from Light Pipeline) → fetch ads directly from this page
+      // No keyword guessing needed — this gives us ONLY ads from the official page
+      console.log(`[Discovery] Fetching ads directly from page ${options.page_id} (page_id provided)`);
+      brandAds = await metaClient.fetchAllAdsFromPage({
+        page_id: options.page_id,
+        ad_reached_countries: countries,
+        max_results: brandSearchLimit,
+      });
+    } else {
+      // Fallback: keyword search (when no page_id available)
+      console.log(`[Discovery] No page_id provided — falling back to keyword search`);
+      brandAds = await metaClient.fetchAllAds({
+        search_terms: brandName,
+        ad_reached_countries: countries,
+        search_type: 'KEYWORD_EXACT_PHRASE',
+        max_results: brandSearchLimit,
+      });
+    }
+
+    const brandInfo = await findBrandDomain(brandName, brandAds, options.page_id);
 
     if (!brandInfo.brand_domain) {
       return makeErrorResponse(brandName, 'Could not find brand domain from Meta ads');
@@ -146,6 +221,71 @@ export async function discoverBrand(
     console.log(`[Discovery] Official pages: ${brandInfo.official_page_ids?.length || 0}`);
     console.log(`[Discovery] Aliases: ${brandInfo.brand_aliases.join(', ')}`);
     progress('step2', `Found brand domain: ${brandInfo.brand_domain} (${brandInfo.platform || 'unknown'})`);
+
+    // Cache brand ads in page_ad_cache (same format as brand-search edge fn)
+    // → "Ads laden" in frontend loads instantly from cache
+    // Use the OFFICIAL page ID (not first ad's page) — this must match what brand-search returns
+    if (options.supabase && brandAds.length > 0 && brandInfo.official_page_ids.length > 0) {
+      const pageId = brandInfo.official_page_ids[0];
+      const pageName = brandAds.find(a => a.page_id === pageId)?.page_name || brandName;
+      const countryKey = [...countries].sort().join(',');
+
+      // Filter to official page ads only — matches what brand-search edge fn returns
+      const officialAds = brandAds.filter(ad => ad.page_id === pageId);
+      const processedAds: ProcessedAd[] = officialAds.map(ad => {
+        const caption = ad.ad_creative_link_captions?.[0] || null;
+        return {
+          id: ad.id,
+          creative_url: ad.ad_snapshot_url || null,
+          primary_text: ad.ad_creative_bodies?.[0] || null,
+          headline: ad.ad_creative_link_titles?.[0] || null,
+          description: ad.ad_creative_link_descriptions?.[0] || null,
+          start_date: ad.ad_delivery_start_time || null,
+          status: (ad.ad_delivery_stop_time ? 'inactive' : 'active') as 'active' | 'inactive',
+          landing_page_url: extractFullUrlFromCaption(caption),
+          landing_page_domain: extractDomainFromCaption(caption),
+          reach: ad.eu_total_reach || null,
+          reach_formatted: formatReach(ad.eu_total_reach),
+          page_id: ad.page_id || null,
+          page_name: ad.page_name || null,
+          platforms: ad.publisher_platforms || [],
+          languages: ad.languages || [],
+        };
+      });
+      processedAds.sort((a, b) => (b.reach || 0) - (a.reach || 0));
+
+      const allCaptions = officialAds.flatMap(ad => ad.ad_creative_link_captions || []);
+      const domains = extractDomainsFromCaptions(allCaptions);
+
+      // Aggregate demographics from official page ads only
+      const demographics = aggregateDemographicsFromAds(officialAds);
+
+      await options.supabase.from('page_ad_cache').upsert({
+        page_id: pageId,
+        page_name: pageName,
+        country: countryKey,
+        total_ads: officialAds.length,
+        data: {
+          success: true,
+          brand: pageName,
+          total_ads: processedAds.length,
+          pages: {
+            official: [{ page_id: pageId, page_name: pageName, ad_count: brandAds.length, is_official: true }],
+            third_party: [],
+          },
+          domains,
+          ads: processedAds,
+          demographics,
+        },
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(), // 90 days
+      }, { onConflict: 'page_id,country' });
+
+      console.log(`[Discovery] Cached ${officialAds.length} official brand ads in page_ad_cache (page ${pageId}, total found: ${brandAds.length})`);
+    }
+
+    // Inter-step delay: Let rate limit budget recover before more API calls
+    await delay(3000);
 
     // ================================================
     // STEP 2a: Search for brand DOMAIN as keyword (KEYWORD_UNORDERED)
@@ -206,6 +346,9 @@ export async function discoverBrand(
 
     console.log(`[Discovery] Step 2a total: ${newAdsCount} new ads merged (brandAds total: ${brandAds.length})`);
 
+    // Inter-step delay: Let rate limit budget recover
+    await delay(3000);
+
     // ================================================
     // STEP 2b: Identify priority candidates from brand search
     // NOTE: This step does NOT create matches — only identifies domains
@@ -230,6 +373,249 @@ export async function discoverBrand(
     progress('step2b', `Found ${priorityDomains.size} priority candidates + ${confirmedThirdPartyPageIds.size} confirmed pages`);
 
     // ================================================
+    // STEP 2c: Extract Ad Creative Previews (Worker-only)
+    // Renders Facebook ad snapshots via local Chromium to extract
+    // image/video URLs. Cached in ad_preview_cache for instant frontend display.
+    // ================================================
+    if (options.supabase && !hasDeadline) {  // Worker-only (no deadline = timeout_ms === 0)
+      console.log(`[Discovery] ═══ STEP 2c: Extract Ad Creative Previews ═══`);
+      progress('step2c', 'Extracting ad creative previews...');
+
+      // Fetch ALL ads from the OFFICIAL page via search_page_ids (same as brand-search edge fn).
+      // This serves TWO purposes:
+      // 1. Update page_ad_cache with the COMPLETE ad set (not just keyword-search subset)
+      // 2. Extract previews for the top 300 ads by reach
+      const officialPageId = brandInfo.official_page_ids[0];
+      let previewAds: MetaAd[] = [];
+      if (officialPageId) {
+        try {
+          console.log(`[Discovery] Preview: Fetching ALL ads for official page ${officialPageId}...`);
+          previewAds = await metaClient.fetchAllAdsFromPage({
+            page_id: officialPageId,
+            ad_reached_countries: [...countries],
+            ad_active_status: 'ALL',
+            max_results: 10000,  // Get ALL ads, same as brand-search edge fn
+          });
+          console.log(`[Discovery] Preview: Found ${previewAds.length} ads from official page`);
+
+          // Update page_ad_cache with the COMPLETE ad set — this overwrites the
+          // partial keyword-search data from Step 2 with the full set
+          const countryKey = [...countries].sort().join(',');
+          const pageName = previewAds[0]?.page_name || brandName;
+          const fullProcessedAds: ProcessedAd[] = previewAds.map(ad => {
+            const caption = ad.ad_creative_link_captions?.[0] || null;
+            return {
+              id: ad.id,
+              creative_url: ad.ad_snapshot_url || null,
+              primary_text: ad.ad_creative_bodies?.[0] || null,
+              headline: ad.ad_creative_link_titles?.[0] || null,
+              description: ad.ad_creative_link_descriptions?.[0] || null,
+              start_date: ad.ad_delivery_start_time || null,
+              status: (ad.ad_delivery_stop_time ? 'inactive' : 'active') as 'active' | 'inactive',
+              landing_page_url: extractFullUrlFromCaption(caption),
+              landing_page_domain: extractDomainFromCaption(caption),
+              reach: ad.eu_total_reach || null,
+              reach_formatted: formatReach(ad.eu_total_reach),
+              page_id: ad.page_id || null,
+              page_name: ad.page_name || null,
+              platforms: ad.publisher_platforms || [],
+              languages: ad.languages || [],
+            };
+          });
+          fullProcessedAds.sort((a, b) => (b.reach || 0) - (a.reach || 0));
+
+          const allCaptions = previewAds.flatMap(ad => ad.ad_creative_link_captions || []);
+          const domains = extractDomainsFromCaptions(allCaptions);
+          const demographics = aggregateDemographicsFromAds(previewAds);
+
+          await options.supabase.from('page_ad_cache').upsert({
+            page_id: officialPageId,
+            page_name: pageName,
+            country: countryKey,
+            total_ads: previewAds.length,
+            data: {
+              success: true,
+              brand: pageName,
+              total_ads: fullProcessedAds.length,
+              pages: {
+                official: [{ page_id: officialPageId, page_name: pageName, ad_count: previewAds.length, is_official: true }],
+                third_party: [],
+              },
+              domains,
+              ads: fullProcessedAds,
+              demographics,
+            },
+            created_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(), // 90 days
+          }, { onConflict: 'page_id,country' });
+
+          console.log(`[Discovery] Preview: Updated page_ad_cache with ${previewAds.length} complete ads (was ~${brandAds.filter(a => a.page_id === officialPageId).length} from keyword search)`);
+        } catch (e) {
+          console.log(`[Discovery] Preview: Failed to fetch page ads, using brandAds fallback: ${e}`);
+          previewAds = brandAds.filter(ad => ad.page_id === officialPageId);
+        }
+      }
+      // Build preview list: Top 100 by reach + 100 newest by date (deduped)
+      // This fills both "Top Ads" and "Neueste" tabs in the dashboard
+      const withSnapshot = previewAds.filter(ad => ad.ad_snapshot_url);
+      const top100 = [...withSnapshot]
+        .sort((a, b) => (b.eu_total_reach || 0) - (a.eu_total_reach || 0))
+        .slice(0, 100);
+      const topIds = new Set(top100.map(a => a.id));
+      const newest100 = [...withSnapshot]
+        .sort((a, b) => {
+          if (!a.ad_delivery_start_time) return 1;
+          if (!b.ad_delivery_start_time) return -1;
+          return new Date(b.ad_delivery_start_time).getTime() - new Date(a.ad_delivery_start_time).getTime();
+        })
+        .filter(a => !topIds.has(a.id))
+        .slice(0, 100);
+      const adsWithSnapshot = [...top100, ...newest100];
+
+      if (adsWithSnapshot.length > 0) {
+        // Check which are already cached
+        const { data: cached } = await options.supabase
+          .from('ad_preview_cache')
+          .select('ad_id')
+          .in('ad_id', adsWithSnapshot.map((a: MetaAd) => a.id));
+        const cachedIds = new Set((cached || []).map((c: any) => c.ad_id));
+
+        const uncached = adsWithSnapshot.filter(a => !cachedIds.has(a.id));
+        console.log(`[Discovery] Preview: ${adsWithSnapshot.length} ads with snapshots, ${cachedIds.size} cached, ${uncached.length} to extract`);
+
+        if (uncached.length > 0) {
+          const { BrowserRenderer } = await import('./browser-renderer.ts');
+          const renderer = BrowserRenderer.getInstance();
+          const previews: { ad_id: string; image_url: string | null; video_url: string | null; type: string }[] = [];
+          const failedAds: typeof uncached = [];
+          let savedCount = 0;  // Track how many previews have been flushed to DB
+
+          // Timeout wrapper to prevent hanging on individual extractions
+          const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+            Promise.race([
+              promise,
+              new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Preview timeout')), ms)),
+            ]);
+
+          // Process 1 at a time — concurrent FB snapshot tabs crash Chromium
+          // (Facebook's heavy React DOM + image loading causes "frame detached" cascades)
+          const PREVIEW_CONCURRENCY = 1;
+          for (let i = 0; i < uncached.length; i += PREVIEW_CONCURRENCY) {
+            const chunk = uncached.slice(i, i + PREVIEW_CONCURRENCY);
+            const results = await Promise.allSettled(
+              chunk.map(async (ad) => {
+                const result = await withTimeout(renderer.extractAdPreview(ad.ad_snapshot_url!), 25000);
+                return { ad_id: ad.id, ...result };
+              })
+            );
+
+            for (let j = 0; j < results.length; j++) {
+              const r = results[j];
+              if (r.status === 'fulfilled' && r.value.type !== 'unknown') {
+                previews.push(r.value);
+              } else {
+                // Both rejected (timeout) and fulfilled-but-unknown (crash) count as failed
+                failedAds.push(chunk[j]);
+              }
+            }
+
+            // If entire chunk failed (crash cascade), wait for browser recovery
+            const chunkSuccesses = results.filter(r => r.status === 'fulfilled' && r.value.type !== 'unknown').length;
+            if (chunkSuccesses === 0 && chunk.length > 1) {
+              console.log(`[Discovery] Preview: Entire chunk failed, waiting 5s for browser recovery...`);
+              await new Promise(r => setTimeout(r, 5000));
+            }
+
+            // Save to DB progressively every 10 ads — previews appear in dashboard immediately
+            if (i % 10 === 0 || i + PREVIEW_CONCURRENCY >= uncached.length) {
+              progress('step2c', `Previews: ${previews.length} extracted (${Math.min(i + PREVIEW_CONCURRENCY, uncached.length)}/${uncached.length})`);
+              // Flush unsaved previews to DB
+              const unsaved = previews.slice(savedCount);
+              if (unsaved.length > 0) {
+                await options.supabase.from('ad_preview_cache').upsert(
+                  unsaved.map(p => ({
+                    ad_id: p.ad_id,
+                    brand: brandName,
+                    image_url: p.image_url,
+                    video_url: p.video_url,
+                    media_type: p.type,
+                  }))
+                );
+                savedCount = previews.length;
+              }
+            }
+          }
+
+          // Retry failed extractions once (single concurrency for stability)
+          if (failedAds.length > 0 && failedAds.length <= 50) {
+            console.log(`[Discovery] Preview: Retrying ${failedAds.length} failed extractions...`);
+            for (const ad of failedAds) {
+              try {
+                const result = await withTimeout(renderer.extractAdPreview(ad.ad_snapshot_url!), 25000);
+                if (result.type !== 'unknown') {
+                  previews.push({ ad_id: ad.id, ...result });
+                }
+              } catch {
+                // Give up on this ad — ScrapingBee will try next
+              }
+            }
+          }
+
+          // ScrapingBee fallback for STILL-failed ads (after local retry)
+          const stillFailed = failedAds.filter(ad => !previews.some(p => p.ad_id === ad.id));
+          if (stillFailed.length > 0) {
+            console.log(`[Discovery] Preview: ScrapingBee fallback for ${stillFailed.length} remaining failures...`);
+            progress('step2c', `ScrapingBee fallback: ${stillFailed.length} remaining...`);
+
+            const { scrapeAdPreviewWithScrapingBee } = await import('./headless-scraper.ts');
+            // Process 3 at a time (ScrapingBee handles concurrency server-side)
+            for (let i = 0; i < stillFailed.length; i += 3) {
+              const chunk = stillFailed.slice(i, i + 3);
+              const results = await Promise.allSettled(
+                chunk.map(ad => scrapeAdPreviewWithScrapingBee(ad.ad_snapshot_url!, ad.id))
+              );
+              for (let j = 0; j < results.length; j++) {
+                const r = results[j];
+                if (r.status === 'fulfilled' && r.value.type !== 'unknown') {
+                  previews.push({ ad_id: chunk[j].id, ...r.value });
+                }
+              }
+              if (i % 9 === 0) {
+                progress('step2c', `ScrapingBee: ${Math.min(i + 3, stillFailed.length)}/${stillFailed.length}`);
+              }
+            }
+            console.log(`[Discovery] Preview: After ScrapingBee, total ${previews.length} previews`);
+          }
+
+          // Final flush — save any remaining unsaved previews (from retries + ScrapingBee)
+          const finalUnsaved = previews.slice(savedCount);
+          if (finalUnsaved.length > 0) {
+            await options.supabase.from('ad_preview_cache').upsert(
+              finalUnsaved.map(p => ({
+                ad_id: p.ad_id,
+                brand: brandName,
+                image_url: p.image_url,
+                video_url: p.video_url,
+                media_type: p.type,
+              }))
+            );
+          }
+
+          console.log(`[Discovery] Preview: Cached ${previews.length}/${uncached.length} ad previews (${failedAds.length} failed)`);
+          progress('step2c', `Cached ${previews.length}/${uncached.length} ad previews`);
+        } else {
+          console.log(`[Discovery] Preview: All ${adsWithSnapshot.length} already cached, skipping`);
+          progress('step2c', `All ${adsWithSnapshot.length} previews already cached`);
+        }
+      } else {
+        console.log(`[Discovery] Preview: No ads with snapshot URLs, skipping`);
+      }
+    }
+
+    // Inter-step delay: Let rate limit budget recover before keyword searches
+    await delay(3000);
+
+    // ================================================
     // STEP 3: Auto-generate product keywords (reuse brandAds)
     // ================================================
     console.log(`[Discovery] ═══ STEP 3: Generate Keywords ═══`);
@@ -248,14 +634,19 @@ export async function discoverBrand(
         ? brandAds.find(a => a.page_id === brandInfo.official_page_ids[0])?.page_name || brandName
         : brandName;
       try {
-        aiKeywords = await refineKeywordsWithAI(
+        const aiResult = await refineKeywordsWithAI(
           keywordResult.keywords,
           brandName,
           officialPageName,
           effectiveMaxKeywords,
           options.openai_key
         );
-        if (aiKeywords) {
+        if (aiResult) {
+          aiKeywords = aiResult.keywords;
+          if (aiResult.brand_category) {
+            brandInfo.brand_category = aiResult.brand_category;
+            console.log(`[Discovery] Brand category: "${aiResult.brand_category}"`);
+          }
           console.log(`[Discovery] AI keywords: ${JSON.stringify(aiKeywords)} (refined from ${keywordResult.keywords.length} candidates)`);
         }
       } catch (e) {
@@ -469,94 +860,222 @@ export async function discoverBrand(
     // ================================================
     // STEP 5e: Extract REAL landing page URLs from ad snapshots
     // Meta captions only give domains (e.g., "lanuvi.com"), NOT full URLs.
-    // The ad_snapshot_url is a Facebook JS-rendered page — needs ScrapingBee.
+    // The ad_snapshot_url is a Facebook JS-rendered page — needs headless browser.
     // We extract the actual landing page URL so Steps 6d/6f can check
     // the correct pages instead of just the homepage.
+    //
+    // CHECKPOINT: Uses full_url_cache table to persist results. On resume after crash,
+    // already-extracted URLs are loaded from cache (no re-render needed).
     // ================================================
-    if (!pastDeadline(20000)) {
-      const useScrapingBeeFor5e = !!options.scrapingbee_key;
-      console.log(`[Discovery] ═══ STEP 5e: Extract Landing Page URLs from Ad Snapshots (ScrapingBee: ${useScrapingBeeFor5e ? 'YES' : 'NO'}) ═══`);
+    // Check if we can skip Step 5e (resume from checkpoint)
+    const checkpoint = options.resumeCheckpoint;
+    const resumeFromStep6 = checkpoint?.step === '5e_done' || checkpoint?.step === 'step6';
+
+    if (resumeFromStep6 && options.supabase) {
+      // RESUME: Load cached URLs instead of re-rendering all snapshots
+      console.log(`[Discovery] ═══ STEP 5e: SKIPPING (checkpoint: ${checkpoint!.step}) — loading URLs from cache ═══`);
+      progress('step5e', 'Loading cached URLs (resume from checkpoint)...');
+
+      let loadedUrlCount = 0;
+      for (const domain of thirdPartyDomains) {
+        try {
+          const { data: cachedUrls } = await options.supabase
+            .from('full_url_cache')
+            .select('domain, extracted_url, final_url')
+            .ilike('domain', domain)
+            .gt('expires_at', new Date().toISOString());
+
+          if (cachedUrls?.length) {
+            const urlMap = new Map<string, number>();
+            for (const row of cachedUrls) {
+              const url = row.final_url || row.extracted_url;
+              if (url) urlMap.set(url, (urlMap.get(url) || 0) + 1);
+            }
+            if (urlMap.size > 0) {
+              domainFullUrls.set(domain.toLowerCase(), urlMap);
+              loadedUrlCount += urlMap.size;
+            }
+          }
+        } catch { /* skip domain on error */ }
+      }
+      console.log(`[Discovery] Step 5e: Loaded ${loadedUrlCount} cached URLs for ${domainFullUrls.size} domains (skipped re-rendering)`);
+      progress('step5e', `Loaded ${loadedUrlCount} cached URLs (checkpoint resume)`);
+
+    } else if (!pastDeadline(20000)) {
+      const useHeadlessFor5e = options.use_headless !== false;
+      console.log(`[Discovery] ═══ STEP 5e: Extract Landing Page URLs from Ad Snapshots (local headless) ═══`);
       progress('step5e', 'Extracting real landing page URLs from ad snapshots...');
 
-      // Limit domains: ScrapingBee costs 5-15 credits per domain, takes 5-15s each
+      // Limit domains: headless rendering takes 5-15s each
       // Edge function: max 6 domains (~20s for 2 batches of 3), leaves time for Step 6
-      // Worker (timeout_ms=0): no limit
-      const maxEnrich = useScrapingBeeFor5e
-        ? (options.timeout_ms === 0 ? 30 : 6) // Worker: 30, Edge fn: 6
+      // Worker (timeout_ms=0): ALL domains (deep CTA needs exact landing page URLs)
+      const maxEnrich = useHeadlessFor5e
+        ? (options.timeout_ms === 0 ? thirdPartyDomains.length : 6) // Worker: ALL, Edge fn: 6
         : Math.min(maxDomainsToCheck || 15, 20);
       const domainsToEnrich = thirdPartyDomains.slice(0, maxEnrich);
       let enriched = 0;
       let enrichFailed = 0;
-      const ENRICH_CONCURRENCY = useScrapingBeeFor5e ? 3 : 5; // Lower concurrency for ScrapingBee
+      let enrichCacheHits = 0;
+      const ENRICH_CONCURRENCY = 12;  // Reduced from 15 — crash cascades at 15 tabs
 
-      console.log(`[Discovery] Step 5e: Enriching ${domainsToEnrich.length} domains`);
+      console.log(`[Discovery] Step 5e: Enriching ${domainsToEnrich.length} domains (concurrent pool, ${ENRICH_CONCURRENCY} parallel)`);
 
-      for (let i = 0; i < domainsToEnrich.length; i += ENRICH_CONCURRENCY) {
-        if (pastDeadline(15000)) {
+      // Concurrent pool: keeps ENRICH_CONCURRENCY tasks in-flight at all times.
+      // Unlike batch-based Promise.all, this starts new domains immediately as each finishes.
+      const enrichPool = new Map<number, Promise<number>>();
+      let nextEnrichIdx = 0;
+      let enrichTimeoutHit = false;
+      let lastEnrichProgress = Date.now();
+
+      while (nextEnrichIdx < domainsToEnrich.length || enrichPool.size > 0) {
+        if (!enrichTimeoutHit && pastDeadline(15000)) {
           console.log(`[Discovery] Step 5e: Stopping URL extraction (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`);
-          break;
+          enrichTimeoutHit = true;
         }
 
-        const batch = domainsToEnrich.slice(i, i + ENRICH_CONCURRENCY);
-        await Promise.all(batch.map(async (domain) => {
-          const domainLower = domain.toLowerCase();
-          const ads = domainToAds.get(domainLower);
-          if (!ads || ads.length === 0) return;
+        // Fill pool up to concurrency limit
+        while (!enrichTimeoutHit && enrichPool.size < ENRICH_CONCURRENCY && nextEnrichIdx < domainsToEnrich.length) {
+          const idx = nextEnrichIdx++;
+          const domain = domainsToEnrich[idx];
 
-          // Find ads with snapshot URLs (try up to 2 per domain)
-          const adsWithSnapshot = ads.filter(a => a.ad_snapshot_url).slice(0, 2);
-          if (adsWithSnapshot.length === 0) return;
-
-          for (const ad of adsWithSnapshot) {
+          // CRITICAL: Outer try-catch prevents a single crash from breaking the entire pool.
+          // Without this, Promise.race() propagates the error and kills the while-loop.
+          const task = (async () => {
             try {
-              let extractedUrl: string | null = null;
+              const domainLower = domain.toLowerCase();
+              const ads = domainToAds.get(domainLower);
+              if (!ads || ads.length === 0) return idx;
 
-              if (useScrapingBeeFor5e) {
-                // ScrapingBee: renders Facebook's JS and extracts CTA link
-                const scrapeResult = await scrapeWithHeadless(
-                  ad.ad_snapshot_url!,
-                  options.scrapingbee_key,
-                  ad.id
-                );
-                if (scrapeResult.success) {
-                  extractedUrl = scrapeResult.final_url || scrapeResult.url;
-                  console.log(`[Discovery] Step 5e: ${domain} → ScrapingBee → ${extractedUrl} (${scrapeResult.credits_used} credits)`);
-                } else {
-                  console.log(`[Discovery] Step 5e: ${domain} → ScrapingBee failed: ${scrapeResult.error}`);
+              // Find ads with snapshot URLs
+              // Worker mode: up to 10 unique snapshots per domain for comprehensive coverage
+              // Edge fn: 2 per domain (fast)
+              const maxSnapshotsPerDomain = options.timeout_ms === 0 ? 10 : 2;
+              const adsWithSnapshot = ads.filter(a => a.ad_snapshot_url)
+                .filter((ad, i, arr) => arr.findIndex(a => a.ad_snapshot_url === ad.ad_snapshot_url) === i) // Dedup snapshots
+                .slice(0, maxSnapshotsPerDomain);
+              if (adsWithSnapshot.length === 0) return idx;
+
+              for (const ad of adsWithSnapshot) {
+                try {
+                  let extractedUrl: string | null = null;
+
+                  // CHECKPOINT: Check full_url_cache first (avoids re-rendering on resume)
+                  if (options.supabase) {
+                    try {
+                      const { data: cached } = await options.supabase
+                        .from('full_url_cache')
+                        .select('extracted_url, final_url')
+                        .eq('ad_id', ad.id)
+                        .gt('expires_at', new Date().toISOString())
+                        .maybeSingle();
+                      if (cached?.extracted_url || cached?.final_url) {
+                        extractedUrl = cached.final_url || cached.extracted_url;
+                        enrichCacheHits++;
+                        console.log(`[Discovery] Step 5e: ${domain} → CACHED → ${extractedUrl}`);
+                      }
+                    } catch { /* cache miss, will render */ }
+                  }
+
+                  // No cache hit — render the ad snapshot
+                  if (!extractedUrl) {
+                    if (useHeadlessFor5e) {
+                      // Headless browser: renders Facebook's JS and extracts CTA link
+                      const scrapeResult = await scrapeWithHeadless(
+                        ad.ad_snapshot_url!,
+                        undefined,
+                        ad.id
+                      );
+                      if (scrapeResult.success) {
+                        extractedUrl = scrapeResult.final_url || scrapeResult.url;
+                        console.log(`[Discovery] Step 5e: ${domain} → rendered → ${extractedUrl}`);
+                      } else {
+                        console.log(`[Discovery] Step 5e: ${domain} → render failed: ${scrapeResult.error}`);
+                      }
+                    } else {
+                      // Fallback: plain fetch (usually fails on Facebook's JS pages)
+                      extractedUrl = await extractLandingPageUrl(ad.ad_snapshot_url!);
+                    }
+
+                    // CHECKPOINT: Save to full_url_cache for resume
+                    if (options.supabase && ad.ad_snapshot_url) {
+                      try {
+                        const urlDomain = extractedUrl ? extractDomainFromUrl(extractedUrl) : null;
+                        await options.supabase.from('full_url_cache').upsert({
+                          ad_id: ad.id,
+                          page_id: ad.page_id || null,
+                          snapshot_url: ad.ad_snapshot_url,
+                          domain: urlDomain || domainLower,
+                          extracted_url: extractedUrl,
+                          final_url: extractedUrl,
+                          extraction_method: useHeadlessFor5e ? 'headless_browser' : 'html_parse',
+                          confidence: extractedUrl ? 0.9 : 0,
+                          scrape_success: !!extractedUrl,
+                          scrape_error: extractedUrl ? null : 'extraction_failed',
+                          expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(), // 90 days
+                        }, { onConflict: 'ad_id' });
+                      } catch (cacheErr) {
+                        console.log(`[Discovery] Step 5e: Cache write error: ${String(cacheErr).substring(0, 80)}`);
+                      }
+                    }
+                  }
+
+                  if (extractedUrl) {
+                    // Store in domainFullUrls for Steps 6d/6f/6g
+                    if (!domainFullUrls.has(domainLower)) {
+                      domainFullUrls.set(domainLower, new Map());
+                    }
+                    const urlMap = domainFullUrls.get(domainLower)!;
+                    urlMap.set(extractedUrl, (urlMap.get(extractedUrl) || 0) + 1);
+                    enriched++;
+
+                    // Check if URL points to the brand domain directly
+                    const urlDomain = extractDomainFromUrl(extractedUrl);
+                    if (urlDomain && isDomainMatch(urlDomain, brandInfo)) {
+                      console.log(`[Discovery] Step 5e: ${domain} → ad links DIRECTLY to brand ${urlDomain}!`);
+                    }
+                    if (options.timeout_ms !== 0) break; // Edge fn: one URL per domain is enough
+                    // Worker mode: continue extracting more URLs per domain
+                  } else {
+                    console.log(`[Discovery] Step 5e: ${domain} → extraction returned null`);
+                  }
+                } catch (e) {
+                  enrichFailed++;
+                  console.log(`[Discovery] Step 5e: ${domain} → error: ${String(e)}`);
                 }
-              } else {
-                // Fallback: plain fetch (usually fails on Facebook's JS pages)
-                extractedUrl = await extractLandingPageUrl(ad.ad_snapshot_url!);
               }
-
-              if (extractedUrl) {
-                // Store in domainFullUrls for Steps 6d/6f
-                if (!domainFullUrls.has(domainLower)) {
-                  domainFullUrls.set(domainLower, new Map());
-                }
-                const urlMap = domainFullUrls.get(domainLower)!;
-                urlMap.set(extractedUrl, (urlMap.get(extractedUrl) || 0) + 1);
-                enriched++;
-
-                // Check if URL points to the brand domain directly
-                const urlDomain = extractDomainFromUrl(extractedUrl);
-                if (urlDomain && isDomainMatch(urlDomain, brandInfo)) {
-                  console.log(`[Discovery] Step 5e: ${domain} → ad links DIRECTLY to brand ${urlDomain}!`);
-                }
-                break; // One good URL per domain is enough
-              } else {
-                console.log(`[Discovery] Step 5e: ${domain} → extraction returned null`);
-              }
-            } catch (e) {
+              return idx;
+            } catch (poolError) {
+              // Outer catch: prevents browser crash from killing entire pool via Promise.race
               enrichFailed++;
-              console.log(`[Discovery] Step 5e: ${domain} → error: ${String(e)}`);
+              console.log(`[Discovery] Step 5e: Pool task CRASHED for ${domain}: ${String(poolError).substring(0, 100)}`);
+              return idx;
             }
+          })();
+
+          enrichPool.set(idx, task);
+        }
+
+        // Wait for at least one to complete, then remove from pool
+        if (enrichPool.size > 0) {
+          const completedIdx = await Promise.race(enrichPool.values());
+          enrichPool.delete(completedIdx);
+
+          // Periodic progress update every 30s to keep watchdog alive
+          if (Date.now() - lastEnrichProgress > 30000) {
+            const totalProcessed = enriched + enrichFailed;
+            progress('step5e', `Enriching URLs: ${totalProcessed}/${domainsToEnrich.length} domains (${enrichCacheHits} cached)`);
+            lastEnrichProgress = Date.now();
           }
-        }));
+        } else {
+          break;
+        }
       }
 
-      console.log(`[Discovery] Step 5e: Extracted ${enriched} landing page URLs (${enrichFailed} failed)`);
-      progress('step5e', `Extracted ${enriched} landing page URLs`);
+      console.log(`[Discovery] Step 5e: Extracted ${enriched} landing page URLs (${enrichFailed} failed, ${enrichCacheHits} from cache)`);
+      progress('step5e', `Extracted ${enriched} landing page URLs (${enrichCacheHits} cached)`);
+      if (options.onCheckpoint) {
+        options.onCheckpoint({ step: '5e_done', detail: `${enriched} URLs extracted, ${enrichCacheHits} cached` });
+      }
     } else {
       console.log(`[Discovery] Step 5e: SKIP (timeout approaching)`);
     }
@@ -578,59 +1097,139 @@ export async function discoverBrand(
 
     // Use headless only if explicitly enabled for domain checks
     const domainCheckHeadless = useHeadlessForDomains && options.use_headless;
-    const domainCheckTimeout = domainCheckHeadless ? DOMAIN_CHECK_TIMEOUT : 8000; // Faster without ScrapingBee
+    const domainCheckTimeout = domainCheckHeadless ? DOMAIN_CHECK_TIMEOUT : 8000;
 
-    // Process in batches
-    for (let i = 0; i < thirdPartyDomains.length; i += DOMAIN_CHECK_CONCURRENCY) {
-      if (pastDeadline(3000)) {
-        console.log(`[Discovery] WARNING: Timeout approaching (${Math.round((Date.now() - startTime) / 1000)}s), skipping remaining ${thirdPartyDomains.length - i} domain checks`);
+    // Concurrent pool: keep DOMAIN_CHECK_CONCURRENCY domains in-flight at all times.
+    // Unlike batch-based Promise.all, this starts new domains as soon as one finishes,
+    // so browser slots stay utilized instead of waiting for slow batch stragglers.
+    const pool = new Map<number, Promise<number>>();
+    let nextDomainIdx = 0;
+    let timeoutHit = false;
+
+    while (nextDomainIdx < thirdPartyDomains.length || pool.size > 0) {
+      if (!timeoutHit && pastDeadline(3000)) {
+        console.log(`[Discovery] WARNING: Timeout approaching (${Math.round((Date.now() - startTime) / 1000)}s), skipping remaining ${thirdPartyDomains.length - nextDomainIdx} domain checks`);
+        timeoutHit = true;
+        // Don't enqueue new domains, but let in-flight ones finish
+      }
+
+      // Fill pool up to concurrency limit (unless timeout hit)
+      while (!timeoutHit && pool.size < DOMAIN_CHECK_CONCURRENCY && nextDomainIdx < thirdPartyDomains.length) {
+        const idx = nextDomainIdx++;
+        const domain = thirdPartyDomains[idx];
+        const pageIds = domainPageMap.get(domain) || [];
+        const adCount = domainAdCount.get(domain) || 0;
+
+        const task = (async () => {
+          try {
+            let check: DomainBrandCheck | null = null;
+
+            // CHECKPOINT: Check domain_check_cache first (avoids re-checking on resume)
+            if (options.supabase) {
+              try {
+                const { data: cached } = await options.supabase
+                  .from('domain_check_cache')
+                  .select('check_result')
+                  .eq('brand', brandName.toLowerCase().trim())
+                  .eq('domain', domain.toLowerCase())
+                  .gt('expires_at', new Date().toISOString())
+                  .maybeSingle();
+                if (cached?.check_result) {
+                  check = cached.check_result as DomainBrandCheck;
+                  console.log(`[Discovery] Step 6: ${domain} → CACHED (${check.is_match ? check.match_type : 'no_match'})`);
+                }
+              } catch { /* cache miss, will check */ }
+            }
+
+            // No cache hit — run the actual domain check
+            if (!check) {
+              try {
+                check = await checkDomainForBrand(domain, brandInfo, {
+                  timeout: domainCheckTimeout,
+                  use_headless: domainCheckHeadless,
+                  deep_cta_enabled: options.deep_cta_enabled,
+                  domainAds: domainToAds.get(domain.toLowerCase()),
+                  domainFullUrls: domainFullUrls.get(domain.toLowerCase()),
+                  openai_key: options.openai_key,
+                });
+              } catch (checkError) {
+                console.log(`[Discovery] Step 6: ${domain} check CRASHED: ${String(checkError).substring(0, 150)}`);
+                check = {
+                  domain,
+                  is_match: false,
+                  match_type: 'none',
+                  confidence: 0,
+                  final_url: null,
+                  redirect_chain: [],
+                  shop_domain: null,
+                  vendor_name: null,
+                  page_ids: [],
+                  ad_count: 0,
+                };
+              }
+
+              // CHECKPOINT: Save to domain_check_cache for resume
+              if (options.supabase) {
+                try {
+                  await options.supabase.from('domain_check_cache').upsert({
+                    brand: brandName.toLowerCase().trim(),
+                    domain: domain.toLowerCase(),
+                    is_match: check.is_match,
+                    match_type: check.match_type,
+                    confidence: check.confidence,
+                    check_result: check,
+                    expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(), // 90 days
+                  }, { onConflict: 'brand,domain' });
+                } catch (cacheErr) {
+                  console.log(`[Discovery] Step 6: Cache write error for ${domain}: ${String(cacheErr).substring(0, 80)}`);
+                }
+              }
+            }
+
+            check.page_ids = pageIds;
+            check.ad_count = adCount;
+
+            checkedCount.current++;
+            const isPriority = priorityDomains.has(domain.toLowerCase());
+            const domUrls = domainFullUrls.get(domain.toLowerCase());
+            debugDomainChecks.push({
+              domain,
+              priority: isPriority,
+              result: check.is_match ? `MATCH(${check.match_type},${check.confidence})` : 'NO_MATCH',
+              urls: domUrls ? [...domUrls.keys()].slice(0, 3) : undefined,
+            });
+
+            if (check.is_match) {
+              matchedDomains.push(check);
+              detectionMethods[check.match_type] = (detectionMethods[check.match_type] || 0) + 1;
+            }
+
+            progress('step6', `Checked ${checkedCount.current}/${checkedCount.total} domains, ${matchedDomains.length} matches`);
+
+            // CHECKPOINT: Notify worker of progress every 10 domains
+            if (options.onCheckpoint && checkedCount.current % 10 === 0) {
+              options.onCheckpoint({
+                step: 'step6',
+                detail: `${checkedCount.current}/${checkedCount.total} domains`,
+                matches_so_far: matchedDomains.length,
+              });
+            }
+          } catch (error) {
+            console.log(`[Discovery] Pool error for ${domain}:`, error);
+            checkedCount.current++;
+          }
+          return idx;
+        })();
+
+        pool.set(idx, task);
+      }
+
+      // Wait for at least one domain to complete, then remove it from pool
+      if (pool.size > 0) {
+        const completedIdx = await Promise.race(pool.values());
+        pool.delete(completedIdx);
+      } else {
         break;
-      }
-
-      const batch = thirdPartyDomains.slice(i, i + DOMAIN_CHECK_CONCURRENCY);
-
-      const results = await Promise.all(
-        batch.map(async (domain) => {
-          const pageIds = domainPageMap.get(domain) || [];
-          const adCount = domainAdCount.get(domain) || 0;
-
-          const check = await checkDomainForBrand(domain, brandInfo, {
-            timeout: domainCheckTimeout,
-            use_headless: domainCheckHeadless,
-            scrapingbee_key: options.scrapingbee_key,
-            domainAds: domainToAds.get(domain.toLowerCase()),
-            domainFullUrls: domainFullUrls.get(domain.toLowerCase()),
-          });
-
-          check.page_ids = pageIds;
-          check.ad_count = adCount;
-          return check;
-        })
-      );
-
-      for (let ri = 0; ri < results.length; ri++) {
-        const result = results[ri];
-        const dom = batch[ri];
-        checkedCount.current++;
-        const isPriority = priorityDomains.has(dom.toLowerCase());
-        const domUrls = domainFullUrls.get(dom.toLowerCase());
-        debugDomainChecks.push({
-          domain: dom,
-          priority: isPriority,
-          result: result.is_match ? `MATCH(${result.match_type},${result.confidence})` : 'NO_MATCH',
-          urls: domUrls ? [...domUrls.keys()].slice(0, 3) : undefined,
-        });
-        if (result.is_match) {
-          matchedDomains.push(result);
-          detectionMethods[result.match_type] = (detectionMethods[result.match_type] || 0) + 1;
-        }
-      }
-
-      progress('step6', `Checked ${checkedCount.current}/${checkedCount.total} domains, ${matchedDomains.length} matches`);
-
-      // Small delay between batches
-      if (i + DOMAIN_CHECK_CONCURRENCY < thirdPartyDomains.length) {
-        await delay(100);
       }
     }
 
@@ -708,7 +1307,8 @@ export async function discoverBrand(
  */
 async function findBrandDomain(
   brandName: string,
-  brandAds: MetaAd[]
+  brandAds: MetaAd[],
+  knownPageId?: string
 ): Promise<BrandInfo> {
   // Generate smart aliases from brand name
   const aliases = new Set<string>();
@@ -745,33 +1345,40 @@ async function findBrandDomain(
     return info;
   }
 
-  // Find official page(s) — page_name contains brand name
-  const brandLower = brandName.toLowerCase();
-  const pageMap = new Map<string, { name: string; count: number }>();
+  // Find official page(s)
+  if (knownPageId) {
+    // page_id provided → use it directly (no guessing)
+    info.official_page_ids = [knownPageId];
+    console.log(`[Discovery] Official page set from provided page_id: ${knownPageId}`);
+  } else {
+    // Fallback: match page_name against brand name
+    const brandLower = brandName.toLowerCase();
+    const pageMap = new Map<string, { name: string; count: number }>();
 
-  for (const ad of brandAds) {
-    if (ad.page_id && ad.page_name) {
-      const existing = pageMap.get(ad.page_id);
-      if (existing) {
-        existing.count++;
-      } else {
-        pageMap.set(ad.page_id, { name: ad.page_name, count: 1 });
+    for (const ad of brandAds) {
+      if (ad.page_id && ad.page_name) {
+        const existing = pageMap.get(ad.page_id);
+        if (existing) {
+          existing.count++;
+        } else {
+          pageMap.set(ad.page_id, { name: ad.page_name, count: 1 });
+        }
       }
     }
-  }
 
-  // Find pages that match brand name
-  for (const [pageId, { name }] of pageMap) {
-    if (name.toLowerCase().includes(brandLower) ||
-        brandLower.includes(name.toLowerCase().replace(/\s+/g, ''))) {
-      info.official_page_ids.push(pageId);
+    // Find pages that match brand name
+    for (const [pageId, { name }] of pageMap) {
+      if (name.toLowerCase().includes(brandLower) ||
+          brandLower.includes(name.toLowerCase().replace(/\s+/g, ''))) {
+        info.official_page_ids.push(pageId);
+      }
     }
-  }
 
-  // If no exact match, use the page with the most ads
-  if (info.official_page_ids.length === 0 && pageMap.size > 0) {
-    const sorted = [...pageMap.entries()].sort((a, b) => b[1].count - a[1].count);
-    info.official_page_ids.push(sorted[0][0]);
+    // If no exact match, use the page with the most ads
+    if (info.official_page_ids.length === 0 && pageMap.size > 0) {
+      const sorted = [...pageMap.entries()].sort((a, b) => b[1].count - a[1].count);
+      info.official_page_ids.push(sorted[0][0]);
+    }
   }
 
   // Extract domain from ad captions
@@ -787,10 +1394,61 @@ async function findBrandDomain(
     }
   }
 
-  // Most common domain is likely the brand's domain
+  // Find the brand's REAL domain — prefer domain containing brand name
   if (domains.size > 0) {
     const sorted = [...domains.entries()].sort((a, b) => b[1] - a[1]);
-    info.brand_domain = sorted[0][0];
+
+    // Strategy 1: Check if any domain contains the brand name (or alias)
+    // e.g., brand "Vitafant" → prefer "vitafant.de" over "naturgesundcheck.com"
+    const brandMatchDomain = sorted.find(([domain]) => {
+      const domBase = domain.replace(/\.[^.]+$/, '').replace(/^www\./, '').toLowerCase();
+      return info.brand_aliases.some(alias => {
+        const aliasClean = alias.replace(/\s+/g, '');
+        return domBase === aliasClean || domBase.includes(aliasClean) || aliasClean.includes(domBase);
+      });
+    });
+
+    // Strategy 2: Extract domain hints from beneficiary/payer names
+    // e.g., payer "vitafant gmbh" → look for "vitafant" in domains
+    let payerMatchDomain: [string, number] | undefined;
+    if (!brandMatchDomain) {
+      const payers = new Set<string>();
+      for (const ad of brandAds) {
+        if (ad.beneficiary_payers) {
+          for (const bp of ad.beneficiary_payers) {
+            if (bp.beneficiary) payers.add(bp.beneficiary.toLowerCase().replace(/\s*(gmbh|llc|inc|ltd|ug|ag|co|kg)\s*/gi, '').trim());
+            if (bp.payer) payers.add(bp.payer.toLowerCase().replace(/\s*(gmbh|llc|inc|ltd|ug|ag|co|kg)\s*/gi, '').trim());
+          }
+        }
+      }
+      if (payers.size > 0) {
+        info.brand_payers = [...payers];
+        for (const payerName of payers) {
+          if (payerName.length < 3) continue;
+          const payerClean = payerName.replace(/\s+/g, '');
+          payerMatchDomain = sorted.find(([domain]) => {
+            const domBase = domain.replace(/\.[^.]+$/, '').replace(/^www\./, '').toLowerCase();
+            return domBase === payerClean || domBase.includes(payerClean) || payerClean.includes(domBase);
+          });
+          if (payerMatchDomain) {
+            // Add payer as alias
+            if (!info.brand_aliases.includes(payerClean)) info.brand_aliases.push(payerClean);
+            break;
+          }
+        }
+      }
+    }
+
+    if (brandMatchDomain) {
+      info.brand_domain = brandMatchDomain[0];
+      console.log(`[Discovery] Brand domain selected by NAME MATCH: ${info.brand_domain} (${brandMatchDomain[1]} ads)`);
+    } else if (payerMatchDomain) {
+      info.brand_domain = payerMatchDomain[0];
+      console.log(`[Discovery] Brand domain selected by PAYER MATCH: ${info.brand_domain} (${payerMatchDomain[1]} ads, payers: ${info.brand_payers?.join(', ')})`);
+    } else {
+      info.brand_domain = sorted[0][0];
+      console.log(`[Discovery] Brand domain selected by FREQUENCY (no name/payer match): ${info.brand_domain} (${sorted[0][1]} ads)`);
+    }
 
     // Add domain name without TLD as an alias (e.g., "glow25" from "glow25.de")
     const domainWithoutTld = info.brand_domain.replace(/\.[^.]+$/, '').toLowerCase();
@@ -814,11 +1472,23 @@ async function findBrandDomain(
             shopify.myshopify_domain.replace('.myshopify.com', '').toLowerCase()
           );
         }
-        if (shopify.vendor_name) {
-          info.brand_aliases.push(shopify.vendor_name.toLowerCase());
-        }
-        if (shopify.og_site_name) {
-          info.brand_aliases.push(shopify.og_site_name.toLowerCase());
+        // Only add vendor_name / og_site_name as alias if it resembles the brand name or domain
+        // Prevents generic product words like "besenreiser", "kollagen" from becoming aliases
+        const domainBase = info.brand_domain!.replace(/\.[^.]+$/, '').toLowerCase();
+        const existingAliases = info.brand_aliases.join(' ');
+        for (const name of [shopify.vendor_name, shopify.og_site_name]) {
+          if (!name) continue;
+          const nameLower = name.toLowerCase().replace(/\s+/g, '');
+          // Only add if it overlaps with the brand name or domain
+          const isBrandRelated = existingAliases.includes(nameLower) ||
+            nameLower.includes(domainBase) || domainBase.includes(nameLower) ||
+            info.brand_aliases.some(a => a.includes(nameLower) || nameLower.includes(a));
+          if (isBrandRelated) {
+            info.brand_aliases.push(nameLower);
+            console.log(`[Discovery] Shopify name "${name}" matches brand → added as alias`);
+          } else {
+            console.log(`[Discovery] Shopify name "${name}" does NOT match brand "${domainBase}" → skipped`);
+          }
         }
       }
     } catch (error) {
@@ -912,11 +1582,24 @@ function detectBrandSearchThirdParty(
 
     // Filter to third-party domains only (not brand's own, not platform domains)
     const PLATFORM_DOMAINS = [
+      // Social / Platform
       'facebook.com', 'fb.com', 'fbcdn.net', 'instagram.com',
       'meta.com', 'meta.ai', 'facebook.net', 'threads.net',
       'whatsapp.com', 'messenger.com', 'google.com', 'youtube.com',
       'tiktok.com', 'twitter.com', 'x.com', 'linkedin.com',
       'pinterest.com', 'snapchat.com',
+      // Marketplaces (multi-vendor — not third-party signals)
+      'amazon.de', 'amazon.com', 'amazon.co.uk', 'amazon.fr', 'amazon.it', 'amazon.es', 'amazon.nl',
+      'ebay.de', 'ebay.com', 'ebay.co.uk',
+      'otto.de', 'kaufland.de', 'idealo.de', 'galaxus.de',
+      'etsy.com', 'aliexpress.com', 'zalando.de', 'aboutyou.de',
+      // Online pharmacies / drugstores (multi-vendor)
+      'docmorris.de', 'shop-apotheke.com', 'medpex.de', 'apo-rot.de',
+      'aponeo.de', 'versandapo.de', 'mycare.de', 'medikamente-per-klick.de',
+      'dm.de', 'rossmann.de', 'mueller.de', 'douglas.de', 'flaconi.de',
+      // Tracking / redirect domains
+      'exactag.com', 'm.exactag.com', 'tradedoubler.com', 'awin1.com',
+      'tradetracker.net', 'webgains.com', 'adcell.de', 'belboon.de',
     ];
     const thirdPartyDomains = [...pageDomains].filter(d => {
       if (d === brandDomain) return false;
@@ -1047,9 +1730,23 @@ function extractUniqueDomains(
   }
 
   const excludedDomains = new Set([
+    // Social / Platform
     'facebook.com', 'fb.com', 'instagram.com', 'meta.com',
     'google.com', 'youtube.com', 'twitter.com', 'pinterest.com',
     'tiktok.com', 'bit.ly', 'linktr.ee', 'l.facebook.com',
+    'linkedin.com', 'x.com', 'snapchat.com', 'threads.net',
+    // Marketplaces (multi-vendor — brand match on ONE product ≠ third-party page)
+    'amazon.de', 'amazon.com', 'amazon.co.uk', 'amazon.fr', 'amazon.it', 'amazon.es', 'amazon.nl',
+    'ebay.de', 'ebay.com', 'ebay.co.uk',
+    'otto.de', 'kaufland.de', 'idealo.de', 'galaxus.de',
+    'etsy.com', 'aliexpress.com', 'zalando.de', 'aboutyou.de',
+    // Online pharmacies / drugstores (multi-vendor)
+    'docmorris.de', 'shop-apotheke.com', 'medpex.de', 'apo-rot.de',
+    'aponeo.de', 'versandapo.de', 'mycare.de', 'medikamente-per-klick.de',
+    'dm.de', 'rossmann.de', 'mueller.de', 'douglas.de', 'flaconi.de',
+    // Tracking / redirect domains
+    'exactag.com', 'm.exactag.com', 'tradedoubler.com', 'awin1.com',
+    'tradetracker.net', 'webgains.com', 'adcell.de', 'belboon.de',
   ]);
 
   for (const ad of ads) {
@@ -1123,9 +1820,10 @@ function extractUniqueDomains(
 interface DomainCheckOptions {
   timeout?: number;
   use_headless?: boolean;
-  scrapingbee_key?: string;
+  deep_cta_enabled?: boolean;              // Enable deep CTA chain following (Worker-only)
   domainAds?: MetaAd[];                    // Ads from this domain (for Step 6f)
   domainFullUrls?: Map<string, number>;    // Full URLs from ad captions → count (for Step 6f/6g)
+  openai_key?: string;                     // For quick AI verification of checkout matches
 }
 
 /**
@@ -1136,7 +1834,7 @@ interface DomainCheckOptions {
  * 6b. HTTP redirect check → does it redirect to brand domain?
  * 6c. Shopify /products.json vendor check
  * 6d. Presell CTA → follow redirect chain → brand domain?
- * 6e. ScrapingBee fallback (if enabled)
+ * 6e. Headless browser fallback (if enabled)
  */
 async function checkDomainForBrand(
   domain: string,
@@ -1198,34 +1896,7 @@ async function checkDomainForBrand(
         return result;
       }
 
-      // ----------------------------------------
-      // 6c. SHOPIFY VENDOR CHECK on the fetched page
-      // ----------------------------------------
       if (fetchResult.html) {
-        // Is it Shopify?
-        const isShopify = /cdn\.shopify\.com/i.test(fetchResult.html);
-
-        if (isShopify && brandInfo.vendor_name) {
-          // Check /products.json for vendor match
-          const vendorCheck = await shopifyStoreHasVendor(domain, brandInfo.vendor_name);
-          if (vendorCheck.found) {
-            console.log(`[Discovery]   shopify → vendor="${vendorCheck.matched_vendor}" → MATCH`);
-            result.is_match = true;
-            result.match_type = 'shopify_vendor';
-            result.confidence = vendorCheck.confidence;
-            result.vendor_name = vendorCheck.matched_vendor;
-            result.shop_domain = domain;
-            console.log(`[Discovery]   RESULT: ✓ MATCH (shopify_vendor, confidence: ${vendorCheck.confidence})`);
-            return result;
-          } else {
-            console.log(`[Discovery]   shopify → vendor="${brandInfo.vendor_name}" ≠ brand`);
-          }
-        } else if (isShopify) {
-          console.log(`[Discovery]   shopify → NOT shopify (no vendor to check)`);
-        } else {
-          console.log(`[Discovery]   shopify → NOT shopify`);
-        }
-
         // Check if the HTML contains links to the brand domain
         if (fetchResult.html.includes(brandDomain)) {
           // Page links to or mentions the brand domain — this is a presell/affiliate
@@ -1240,7 +1911,7 @@ async function checkDomainForBrand(
 
         // Note: We intentionally do NOT match on brand alias in HTML (content_match).
         // Just because "glow25" appears somewhere on a page doesn't mean it's an affiliate.
-        // Only URL-chain verified matches count (redirect, CTA, checkout, Shopify vendor).
+        // Only URL-chain verified matches count (redirect, CTA, checkout).
       }
 
       // ----------------------------------------
@@ -1249,16 +1920,18 @@ async function checkDomainForBrand(
       // Check BOTH homepage AND specific ad landing page URLs for CTAs.
       // Presell pages often have the CTA only on specific paths, not the homepage.
       {
-        // Collect URLs to check: homepage + top 3 specific landing page URLs
+        // Collect URLs to check: homepage + landing page URLs from ads
+        // Worker mode (deep_cta): ALL landing page URLs for comprehensive coverage
+        // Edge fn: homepage + top 3 only
         const presellUrlsToCheck: string[] = [`https://${domain}`];
         if (options.domainFullUrls) {
           const sortedUrls = [...options.domainFullUrls.entries()]
             .filter(([url]) => {
               try { return new URL(url).pathname !== '/'; } catch { return false; }
             })
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3);
-          for (const [url] of sortedUrls) {
+            .sort((a, b) => b[1] - a[1]);
+          const maxUrls = options.deep_cta_enabled ? sortedUrls.length : 3;
+          for (const [url] of sortedUrls.slice(0, maxUrls)) {
             if (!presellUrlsToCheck.includes(url)) {
               presellUrlsToCheck.push(url);
             }
@@ -1286,47 +1959,31 @@ async function checkDomainForBrand(
               return result;
             }
 
-            // CTA led to a Shopify store — check vendor
-            if (ctaFinalDomain && brandInfo.vendor_name) {
-              try {
-                const vendorCheck = await shopifyStoreHasVendor(ctaFinalDomain, brandInfo.vendor_name);
-                if (vendorCheck.found) {
-                  result.is_match = true;
-                  result.match_type = 'checkout_match';
-                  result.confidence = vendorCheck.confidence;
-                  result.vendor_name = vendorCheck.matched_vendor;
-                  result.shop_domain = ctaFinalDomain;
-                  result.redirect_chain = presellResult.chain;
-                  console.log(`[Discovery]   RESULT: ✓ MATCH (checkout_match, confidence: ${vendorCheck.confidence})`);
-                  return result;
-                }
-              } catch {
-                // Vendor check failed, continue
-              }
-            }
-
             // CTA led to a non-brand domain — check if the checkout page mentions the brand
             // Covers WooCommerce, Digistore24, Magento, custom shops
             if (ctaFinalDomain && presellResult.final_url) {
               try {
                 const checkoutResult = await detectBrandFromCheckout(presellResult.final_url, { timeout: 8000 });
                 if (checkoutResult.brand_name) {
-                  const checkoutBrandLower = checkoutResult.brand_name.toLowerCase();
-                  const brandMatch = brandInfo.brand_aliases.some(alias =>
-                    alias.length >= 4 && (checkoutBrandLower.includes(alias) || alias.includes(checkoutBrandLower))
-                  );
+                  const brandMatch = isCheckoutBrandMatch(checkoutResult.brand_name, brandInfo);
                   if (brandMatch) {
-                    result.is_match = true;
-                    result.match_type = 'checkout_match';
-                    result.confidence = Math.min(checkoutResult.confidence, 0.85);
-                    result.vendor_name = checkoutResult.brand_name;
-                    result.shop_domain = ctaFinalDomain;
-                    result.redirect_chain = presellResult.chain;
-                    console.log(`[Discovery]   checkout → brand "${checkoutResult.brand_name}" (${checkoutResult.platform}, ${checkoutResult.detection_method}) → MATCH`);
-                    console.log(`[Discovery]   RESULT: ✓ MATCH (checkout_brand, confidence: ${result.confidence})`);
-                    return result;
+                    // Quick AI guard: verify the match isn't a false positive
+                    const aiConfirmed = await quickAIVerify(checkoutResult.brand_name, brandInfo, options.openai_key);
+                    if (aiConfirmed) {
+                      result.is_match = true;
+                      result.match_type = 'checkout_match';
+                      result.confidence = Math.min(checkoutResult.confidence, 0.85);
+                      result.vendor_name = checkoutResult.brand_name;
+                      result.shop_domain = ctaFinalDomain;
+                      result.redirect_chain = presellResult.chain;
+                      console.log(`[Discovery]   checkout → brand "${checkoutResult.brand_name}" (${checkoutResult.platform}, ${checkoutResult.detection_method}) → MATCH (strict+AI)`);
+                      console.log(`[Discovery]   RESULT: ✓ MATCH (checkout_brand, confidence: ${result.confidence})`);
+                      return result;
+                    } else {
+                      console.log(`[Discovery]   checkout → brand "${checkoutResult.brand_name}" — strict match passed but AI rejected`);
+                    }
                   } else {
-                    console.log(`[Discovery]   checkout → brand "${checkoutResult.brand_name}" ≠ ${brandInfo.brand_name}`);
+                    console.log(`[Discovery]   checkout → brand "${checkoutResult.brand_name}" ≠ ${brandInfo.brand_name} (strict match rejected)`);
                   }
                 }
               } catch {
@@ -1445,136 +2102,209 @@ async function checkDomainForBrand(
     }
 
     // ----------------------------------------
-    // 6g. SCRAPINGBEE PRESELL PAGE RENDER (PAID, 5 credits)
-    // Render the actual landing page with JS and check for brand links.
-    // This is the KEY step: presell pages load CTAs via JavaScript,
-    // so plain HTTP (Steps 6c/6d/6f) can't see them. ScrapingBee renders
-    // the full page and we check if ANY link points to the brand domain.
+    // 6g. HEADLESS PRESELL PAGE RENDER (local Chromium, FREE)
+    // Render landing pages with JS and check for brand links.
+    // KEY: presell pages load CTAs via JavaScript — plain HTTP can't see them.
+    // Now renders ALL extracted URLs per domain (not just the best one).
+    // Tracks whether external links exist for smart 6h gating.
     // ----------------------------------------
-    if (options.scrapingbee_key) {
-      // Pick the best URL to render: specific landing page > homepage
-      let targetUrl = `https://${domain}`;
+    let domainHasExternalLinks = false;  // Track for 6h gating
+    if (options.use_headless !== false) {
+      // Collect ALL URLs to render: homepage + all landing page URLs
+      const renderUrls: string[] = [`https://${domain}`];
       if (options.domainFullUrls && options.domainFullUrls.size > 0) {
         const specificUrls = [...options.domainFullUrls.entries()]
           .filter(([url]) => {
             try { return new URL(url).pathname.length > 1; } catch { return false; }
           })
           .sort((a, b) => b[1] - a[1]);
-        if (specificUrls.length > 0) {
-          targetUrl = specificUrls[0][0];
+        for (const [url] of specificUrls) {
+          if (!renderUrls.includes(url)) renderUrls.push(url);
         }
       }
 
-      console.log(`[Discovery]   6g: ScrapingBee rendering ${targetUrl.substring(0, 80)}...`);
-      try {
-        const SCRAPINGBEE_BASE = 'https://app.scrapingbee.com/api/v1/';
-        const params = new URLSearchParams({
-          api_key: options.scrapingbee_key,
-          url: targetUrl,
-          render_js: 'true',
-          wait: '3000',
-        });
+      console.log(`[Discovery]   6g: Headless rendering ${renderUrls.length} URLs for ${domain}...`);
+      const { BrowserRenderer } = await import('./browser-renderer.ts');
+      const renderer = BrowserRenderer.getInstance();
 
-        const sbResponse = await fetch(`${SCRAPINGBEE_BASE}?${params}`);
+      for (const targetUrl of renderUrls) {
+        try {
+          const sbResult = await renderer.renderPage(targetUrl, { wait_ms: 3000, timeout_ms: 20000 });
 
-        if (sbResponse.ok) {
-          const html = await sbResponse.text();
-          const htmlLower = html.toLowerCase();
+          if (sbResult.html) {
+            const html = sbResult.html;
+            const htmlLower = html.toLowerCase();
 
-          // Check 1: Does rendered HTML contain a link to the brand domain?
-          const linkRegex = /href=["']([^"']*?)["']/gi;
-          let linkMatch;
-          while ((linkMatch = linkRegex.exec(html)) !== null) {
-            try {
-              const linkDomain = extractDomainFromUrl(linkMatch[1]);
-              if (linkDomain && isDomainMatch(linkDomain, brandInfo)) {
-                result.is_match = true;
-                result.match_type = 'presell_cta';
-                result.confidence = 0.85;
-                result.shop_domain = linkDomain;
-                console.log(`[Discovery]   6g: Found brand link: ${linkMatch[1].substring(0, 80)} → MATCH`);
-                console.log(`[Discovery]   RESULT: ✓ MATCH (presell_rendered, confidence: 0.85)`);
-                return result;
-              }
-            } catch { /* skip invalid URLs */ }
-          }
-
-          // Check 2: Does rendered HTML mention the brand domain in text?
-          if (htmlLower.includes(brandDomain)) {
-            result.is_match = true;
-            result.match_type = 'content_link';
-            result.confidence = 0.80;
-            result.shop_domain = brandDomain;
-            console.log(`[Discovery]   6g: Rendered HTML contains "${brandDomain}" → MATCH`);
-            console.log(`[Discovery]   RESULT: ✓ MATCH (presell_content, confidence: 0.80)`);
-            return result;
-          }
-
-          // Note: No content_match on rendered HTML — only URL-chain verified matches count.
-
-          // Check 4: Follow CTA-like links through redirects (tracking links etc.)
-          const ctaPatterns = ['shop', 'kauf', 'bestell', 'checkout', 'angebot', 'buy', 'order', '/go/', '/out/', '/click', '/redirect', '/track'];
-          const allLinks: string[] = [];
-          const linkExtract = /href=["'](https?:\/\/[^"']+)["']/gi;
-          let le;
-          while ((le = linkExtract.exec(html)) !== null) {
-            allLinks.push(le[1]);
-          }
-          const ctaLinks = allLinks.filter(l => {
-            const lLower = l.toLowerCase();
-            return ctaPatterns.some(p => lLower.includes(p));
-          }).slice(0, 3);
-
-          for (const ctaLink of ctaLinks) {
-            try {
-              const redirectResult = await fetchWithRedirects(ctaLink, 8000);
-              if (redirectResult) {
-                const ctaFinalDomain = extractDomainFromUrl(redirectResult.final_url);
-                if (ctaFinalDomain && isDomainMatch(ctaFinalDomain, brandInfo)) {
+            // Check 1: Does rendered HTML contain a link to the brand domain?
+            const linkRegex = /href=["']([^"']*?)["']/gi;
+            let linkMatch;
+            while ((linkMatch = linkRegex.exec(html)) !== null) {
+              try {
+                const linkDomain = extractDomainFromUrl(linkMatch[1]);
+                if (linkDomain && isDomainMatch(linkDomain, brandInfo)) {
                   result.is_match = true;
                   result.match_type = 'presell_cta';
                   result.confidence = 0.85;
-                  result.shop_domain = ctaFinalDomain;
-                  result.redirect_chain = redirectResult.chain;
-                  console.log(`[Discovery]   6g: CTA redirect ${ctaLink.substring(0, 60)} → ${redirectResult.final_url} → MATCH`);
-                  console.log(`[Discovery]   RESULT: ✓ MATCH (presell_cta_redirect, confidence: 0.85)`);
+                  result.shop_domain = linkDomain;
+                  console.log(`[Discovery]   6g: Found brand link on ${targetUrl.substring(0, 60)}: ${linkMatch[1].substring(0, 80)} → MATCH`);
+                  console.log(`[Discovery]   RESULT: ✓ MATCH (presell_rendered, confidence: 0.85)`);
                   return result;
                 }
-
-                // CTA led to non-brand domain — check checkout page for brand
-                if (ctaFinalDomain) {
-                  try {
-                    const checkoutResult = await detectBrandFromCheckout(redirectResult.final_url, { timeout: 8000 });
-                    if (checkoutResult.brand_name) {
-                      const checkoutBrandLower = checkoutResult.brand_name.toLowerCase();
-                      const brandMatch = brandInfo.brand_aliases.some(alias =>
-                        alias.length >= 4 && (checkoutBrandLower.includes(alias) || alias.includes(checkoutBrandLower))
-                      );
-                      if (brandMatch) {
-                        result.is_match = true;
-                        result.match_type = 'checkout_match';
-                        result.confidence = Math.min(checkoutResult.confidence, 0.85);
-                        result.vendor_name = checkoutResult.brand_name;
-                        result.shop_domain = ctaFinalDomain;
-                        result.redirect_chain = redirectResult.chain;
-                        console.log(`[Discovery]   6g: Checkout brand "${checkoutResult.brand_name}" (${checkoutResult.platform}) → MATCH`);
-                        console.log(`[Discovery]   RESULT: ✓ MATCH (checkout_brand_rendered, confidence: ${result.confidence})`);
-                        return result;
-                      }
-                    }
-                  } catch { /* checkout detection failed */ }
+                // Track if there are ANY external links (for 6h gating)
+                if (linkDomain && linkDomain !== domain.toLowerCase().replace(/^www\./, '')) {
+                  domainHasExternalLinks = true;
                 }
-              }
-            } catch { /* skip this CTA */ }
-          }
+              } catch { /* skip invalid URLs */ }
+            }
 
-          console.log(`[Discovery]   6g: Rendered page → no brand links found (${allLinks.length} links checked)`);
-        } else {
-          console.log(`[Discovery]   6g: ScrapingBee HTTP ${sbResponse.status}`);
+            // Check 2: Does rendered HTML mention the brand domain in text?
+            if (htmlLower.includes(brandDomain)) {
+              result.is_match = true;
+              result.match_type = 'content_link';
+              result.confidence = 0.80;
+              result.shop_domain = brandDomain;
+              console.log(`[Discovery]   6g: Rendered HTML of ${targetUrl.substring(0, 60)} contains "${brandDomain}" → MATCH`);
+              console.log(`[Discovery]   RESULT: ✓ MATCH (presell_content, confidence: 0.80)`);
+              return result;
+            }
+
+            // Check 3: Follow CTA-like links through redirects (tracking links etc.)
+            const ctaPatterns = ['shop', 'kauf', 'bestell', 'checkout', 'angebot', 'buy', 'order', '/go/', '/out/', '/click', '/redirect', '/track'];
+            const allLinks: string[] = [];
+            const linkExtract = /href=["'](https?:\/\/[^"']+)["']/gi;
+            let le;
+            while ((le = linkExtract.exec(html)) !== null) {
+              allLinks.push(le[1]);
+            }
+
+            // Track external links for 6h gating
+            const externalLinks = allLinks.filter(l => {
+              try {
+                const lDomain = new URL(l).hostname.replace(/^www\./, '');
+                return lDomain !== domain.toLowerCase().replace(/^www\./, '');
+              } catch { return false; }
+            });
+            if (externalLinks.length > 0) domainHasExternalLinks = true;
+
+            const ctaLinks = allLinks.filter(l => {
+              const lLower = l.toLowerCase();
+              return ctaPatterns.some(p => lLower.includes(p));
+            }).slice(0, 3);
+
+            for (const ctaLink of ctaLinks) {
+              try {
+                const redirectResult = await fetchWithRedirects(ctaLink, 8000);
+                if (redirectResult) {
+                  const ctaFinalDomain = extractDomainFromUrl(redirectResult.final_url);
+                  if (ctaFinalDomain && isDomainMatch(ctaFinalDomain, brandInfo)) {
+                    result.is_match = true;
+                    result.match_type = 'presell_cta';
+                    result.confidence = 0.85;
+                    result.shop_domain = ctaFinalDomain;
+                    result.redirect_chain = redirectResult.chain;
+                    console.log(`[Discovery]   6g: CTA redirect ${ctaLink.substring(0, 60)} → ${redirectResult.final_url} → MATCH`);
+                    console.log(`[Discovery]   RESULT: ✓ MATCH (presell_cta_redirect, confidence: 0.85)`);
+                    return result;
+                  }
+
+                  // CTA led to non-brand domain — check checkout page for brand
+                  if (ctaFinalDomain) {
+                    try {
+                      const checkoutResult = await detectBrandFromCheckout(redirectResult.final_url, { timeout: 8000 });
+                      if (checkoutResult.brand_name) {
+                        const brandMatch = isCheckoutBrandMatch(checkoutResult.brand_name, brandInfo);
+                        if (brandMatch) {
+                          const aiConfirmed = await quickAIVerify(checkoutResult.brand_name, brandInfo, options.openai_key);
+                          if (aiConfirmed) {
+                            result.is_match = true;
+                            result.match_type = 'checkout_match';
+                            result.confidence = Math.min(checkoutResult.confidence, 0.85);
+                            result.vendor_name = checkoutResult.brand_name;
+                            result.shop_domain = ctaFinalDomain;
+                            result.redirect_chain = redirectResult.chain;
+                            console.log(`[Discovery]   6g: Checkout brand "${checkoutResult.brand_name}" (${checkoutResult.platform}) → MATCH (strict+AI)`);
+                            console.log(`[Discovery]   RESULT: ✓ MATCH (checkout_brand_rendered, confidence: ${result.confidence})`);
+                            return result;
+                          } else {
+                            console.log(`[Discovery]   6g: Checkout "${checkoutResult.brand_name}" — strict match passed but AI rejected`);
+                          }
+                        }
+                      }
+                    } catch { /* checkout detection failed */ }
+                  }
+                }
+              } catch { /* skip this CTA */ }
+            }
+
+            console.log(`[Discovery]   6g: ${targetUrl.substring(0, 60)} → no brand links (${allLinks.length} links, ${externalLinks.length} external)`);
+          } else {
+            console.log(`[Discovery]   6g: ${targetUrl.substring(0, 60)} → render failed`);
+          }
+        } catch (error) {
+          console.log(`[Discovery]   6g: ${targetUrl.substring(0, 60)} → error: ${String(error).substring(0, 80)}`);
         }
-      } catch (error) {
-        console.log(`[Discovery]   6g: Error: ${String(error)}`);
       }
+
+      console.log(`[Discovery]   6g: All ${renderUrls.length} URLs rendered → no brand match (external links: ${domainHasExternalLinks})`);
+    }
+
+    // ----------------------------------------
+    // 6h. DEEP CTA CHAIN FOLLOW (Worker-Mode, headless browser)
+    // Renders each landing page with JS, finds CTAs, follows them
+    // through multiple hops until reaching checkout.
+    // This catches presell → offer → checkout chains like:
+    // naturgesundcheck.com → CTA → CTA → vitafant.com/checkouts/
+    //
+    // Runs for EVERY unmatched domain — no smart gate.
+    // Domains without CTAs bail out after one free HTTP fetch (no credits).
+    // ----------------------------------------
+    if (options.deep_cta_enabled) {
+      // Collect landing page URLs: homepage + top 2 specific URLs (max 3 total)
+      // Brand-affiliated accounts push ONE brand — 3 URLs is sufficient
+      const deepCheckUrls: string[] = [`https://${domain}`];
+      if (options.domainFullUrls) {
+        const sortedUrls = [...options.domainFullUrls.entries()]
+          .filter(([url]) => {
+            try { return new URL(url).pathname !== '/'; } catch { return false; }
+          })
+          .sort((a, b) => b[1] - a[1]);
+        for (const [url] of sortedUrls.slice(0, 2)) {  // Max 2 specific URLs + homepage = 3 total
+          if (!deepCheckUrls.includes(url)) {
+            deepCheckUrls.push(url);
+          }
+        }
+      }
+
+      console.log(`[Discovery]   6h: Deep CTA chain follow (${deepCheckUrls.length} URLs)...`);
+
+      for (const targetUrl of deepCheckUrls) {
+        try {
+          const deepResult = await deepCTAChainFollow(targetUrl, {
+            brand_info: brandInfo,
+            max_hops: 5,
+            render_wait_ms: 3000,
+            timeout_per_hop_ms: 20000,
+            total_timeout_ms: 90000,
+          });
+
+          if (deepResult.is_brand_match) {
+            result.is_match = true;
+            result.match_type = 'deep_cta';
+            result.confidence = deepResult.confidence;
+            result.shop_domain = deepResult.final_domain;
+            result.redirect_chain = deepResult.chain.map(h => h.page_url);
+            console.log(`[Discovery]   6h: MATCH via deep CTA chain: ${targetUrl} → ${deepResult.chain.map(h => h.page_url).join(' → ')} → ${deepResult.final_domain}`);
+            console.log(`[Discovery]   RESULT: ✓ MATCH (deep_cta, confidence: ${deepResult.confidence})`);
+            return result;
+          } else {
+            console.log(`[Discovery]   6h: ${targetUrl.substring(0, 60)} → no match (${deepResult.total_hops} hops)`);
+          }
+        } catch (error) {
+          console.log(`[Discovery]   6h: Error for ${targetUrl.substring(0, 60)}: ${String(error)}`);
+        }
+      }
+
+      console.log(`[Discovery]   6h: Deep CTA → no brand match found in any URL`);
     }
 
     console.log(`[Discovery]   RESULT: ✗ NO MATCH`);
@@ -1607,6 +2337,75 @@ function isDomainMatch(domain: string, brandInfo: BrandInfo): boolean {
   for (const alias of brandInfo.brand_aliases) {
     const normalized = alias.replace(/[\s\-_.]+/g, '');
     if (normalized.length >= 3 && domainLower.includes(normalized)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Strict checkout brand match — replaces the old loose substring matching.
+ *
+ * Prevents false positives like "nutrition" matching "Best Body Nutrition"
+ * when the checkout says "MORE Nutrition".
+ *
+ * 3-Tier logic:
+ * Tier 1: Domain-core match (strongest — strip TLD, normalize)
+ * Tier 2: Alias match with 60% length ratio + full containment
+ * Tier 3: Exact vendor_name match
+ */
+function isCheckoutBrandMatch(
+  checkoutBrandName: string,
+  brandInfo: BrandInfo
+): boolean {
+  const checkoutNorm = checkoutBrandName.toLowerCase().replace(/[\s\-_.]+/g, '');
+  if (checkoutNorm.length < 3) return false;
+
+  // Tier 1: Domain-core match
+  // "best-body-shop.de" → "bestbodyshop"
+  if (brandInfo.brand_domain) {
+    const domainCore = brandInfo.brand_domain
+      .replace(/^www\./, '')
+      .replace(/\.[a-z]{2,6}$/, '')  // strip TLD (.de, .com, .co.uk)
+      .replace(/[\s\-_.]+/g, '')
+      .toLowerCase();
+    if (domainCore.length >= 4) {
+      if (checkoutNorm === domainCore) return true;
+      // Full containment with 60% length ratio
+      const longer = Math.max(checkoutNorm.length, domainCore.length);
+      const shorter = Math.min(checkoutNorm.length, domainCore.length);
+      if (shorter / longer >= 0.6) {
+        if (checkoutNorm.includes(domainCore) || domainCore.includes(checkoutNorm)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // Tier 2: Alias match (strict — 60% length ratio + full containment)
+  for (const alias of brandInfo.brand_aliases) {
+    const aliasNorm = alias.replace(/[\s\-_.]+/g, '').toLowerCase();
+    if (aliasNorm.length < 4) continue;
+
+    // Exact match
+    if (checkoutNorm === aliasNorm) return true;
+
+    // Length ratio check: shorter must be >= 60% of longer
+    const longer = Math.max(checkoutNorm.length, aliasNorm.length);
+    const shorter = Math.min(checkoutNorm.length, aliasNorm.length);
+    if (shorter / longer < 0.6) continue;
+
+    // Full containment required
+    if (checkoutNorm.includes(aliasNorm) || aliasNorm.includes(checkoutNorm)) {
+      return true;
+    }
+  }
+
+  // Tier 3: Exact vendor_name match
+  if (brandInfo.vendor_name) {
+    const vendorNorm = brandInfo.vendor_name.replace(/[\s\-_.]+/g, '').toLowerCase();
+    if (vendorNorm.length >= 4 && checkoutNorm === vendorNorm) {
       return true;
     }
   }
@@ -1709,9 +2508,6 @@ function buildDiscoveryResult(
       presellDomains.push(match.domain);
     } else if (match.match_type === 'redirect') {
       redirectDomains.push(match.domain);
-    } else if (match.match_type === 'shopify_vendor') {
-      // Third-party Shopify store selling the brand
-      shopDomains.push(match.domain);
     } else if (match.match_type === 'direct') {
       shopDomains.push(match.domain);
     }
@@ -1831,6 +2627,7 @@ function buildDiscoveryResult(
     brand: brandName,
     brand_domain: brandInfo.brand_domain,
     brand_platform: brandInfo.platform,
+    brand_category: brandInfo.brand_category || null,
 
     pages: {
       official: officialPages,

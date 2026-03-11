@@ -10,6 +10,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { MetaAd } from '../../../lib/types.ts';
 import { MetaAdLibraryClient, MetaApiError } from '../../../lib/meta-api.ts';
 import { extractDomainFromCaption } from '../../../lib/url-extractor.ts';
@@ -126,18 +127,103 @@ serve(async (req) => {
     const query = body.query.trim();
     const country = body.country || 'DE';
 
-    // Get Meta API access token
-    const metaAccessToken = Deno.env.get('META_ACCESS_TOKEN');
-    if (!metaAccessToken) {
+    // ========== CACHE-FIRST: Check page_ad_cache for instant results ==========
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY');
+    if (supabaseUrl && supabaseKey) {
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const queryLower = query.toLowerCase();
+
+      // Search page_ad_cache for matching page_name (case-insensitive)
+      const { data: cachedPages, error: cacheErr } = await supabase
+        .from('page_ad_cache')
+        .select('page_id, page_name, total_ads, country')
+        .gt('expires_at', new Date().toISOString())
+        .ilike('page_name', `%${queryLower}%`)
+        .limit(10);
+
+      if (!cacheErr && cachedPages && cachedPages.length > 0) {
+        // Build quick results from cache
+        const cacheResults: QuickPageResult[] = cachedPages.map(cp => ({
+          page_id: cp.page_id,
+          page_name: cp.page_name || 'Unknown',
+          ad_count: cp.total_ads || 0,
+          top_domain: null,
+          sample_reach: 0,
+          match_score: calculateQuickScore(cp.page_name || '', query, 0, cp.total_ads || 0),
+          is_quick_result: true as const,
+        }));
+
+        cacheResults.sort((a, b) => b.match_score - a.match_score);
+
+        const searchTime = Date.now() - startTime;
+        console.log(`[QUICK] CACHE HIT: Found ${cacheResults.length} pages in ${searchTime}ms`);
+
+        return new Response(JSON.stringify({
+          success: true,
+          query,
+          pages: cacheResults.slice(0, 5),
+          search_time_ms: searchTime,
+          is_quick_search: true,
+          from_cache: true,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      console.log(`[QUICK] No cache match for "${query}", falling back to Meta API`);
+    }
+
+    // ========== EXPIRED CACHE CHECK (fallback): page_id/name still valid ==========
+    if (supabaseUrl && supabaseKey) {
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const queryLower = query.toLowerCase();
+
+      const { data: expiredPages } = await supabase
+        .from('page_ad_cache')
+        .select('page_id, page_name, total_ads, country')
+        .ilike('page_name', `%${queryLower}%`)
+        .limit(5);
+
+      if (expiredPages && expiredPages.length > 0) {
+        const expiredResults: QuickPageResult[] = expiredPages.map(cp => ({
+          page_id: cp.page_id,
+          page_name: cp.page_name || 'Unknown',
+          ad_count: cp.total_ads || 0,
+          top_domain: null,
+          sample_reach: 0,
+          match_score: calculateQuickScore(cp.page_name || '', query, 0, cp.total_ads || 0),
+          is_quick_result: true as const,
+        }));
+        expiredResults.sort((a, b) => b.match_score - a.match_score);
+
+        const searchTime = Date.now() - startTime;
+        console.log(`[QUICK] EXPIRED CACHE: Found ${expiredResults.length} pages for "${query}" in ${searchTime}ms`);
+
+        return new Response(JSON.stringify({
+          success: true,
+          query,
+          pages: expiredResults.slice(0, 5),
+          search_time_ms: searchTime,
+          is_quick_search: true,
+          from_expired_cache: true,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // ========== META API SEARCH ==========
+    const metaSearchToken = Deno.env.get('META_SEARCH_TOKEN') || '';
+    if (!metaSearchToken) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Meta API access token not configured', is_quick_search: true }),
+        JSON.stringify({ success: false, error: 'META_SEARCH_TOKEN not configured', is_quick_search: true }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     // Initialize Meta API client
     const metaClient = new MetaAdLibraryClient({
-      access_token: metaAccessToken,
+      access_token: metaSearchToken,
     });
 
     console.log(`[QUICK] Searching for: "${query}" in ${country}`);
@@ -167,6 +253,8 @@ serve(async (req) => {
     console.log(`[QUICK] Search variants: ${variantsArray.join(', ')}`);
 
     // PARALLEL API CALLS - Fast but thorough
+    let lastError: unknown = null;
+    let errorCount = 0;
     const searchPromises = variantsArray.map(async (term) => {
       try {
         const termAds = await metaClient.fetchAllAds({
@@ -180,6 +268,8 @@ serve(async (req) => {
         return termAds;
       } catch (err) {
         console.log(`[QUICK] "${term}" failed:`, err);
+        lastError = err;
+        errorCount++;
         return [] as MetaAd[];
       }
     });
@@ -187,6 +277,28 @@ serve(async (req) => {
     // Wait for all searches to complete
     const results = await Promise.all(searchPromises);
     const ads = results.flat();
+
+    // If ALL searches failed, propagate the error
+    if (errorCount === variantsArray.length && lastError) {
+      const isRateLimit = lastError instanceof MetaApiError && (lastError.code === 613 || lastError.code === 4);
+      const errorMsg = isRateLimit
+        ? 'Meta API Rate Limit erreicht. Bitte warte einige Minuten und versuche es erneut.'
+        : lastError instanceof MetaApiError
+        ? `Meta API Fehler: ${lastError.message} (Code: ${lastError.code})`
+        : `API Fehler: ${String(lastError)}`;
+
+      console.error(`[QUICK] ALL ${errorCount} searches failed. Last error:`, lastError);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: errorMsg,
+          is_quick_search: true,
+          is_rate_limit: isRateLimit,
+          search_time_ms: Date.now() - startTime,
+        }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     console.log(`[QUICK] Total: ${ads.length} ads from ${variantsArray.length} parallel searches`);
 

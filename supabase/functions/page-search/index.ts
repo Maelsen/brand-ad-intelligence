@@ -187,18 +187,17 @@ serve(async (req) => {
 
     const query = body.query.trim();
 
-    // Get Meta API access token from environment
-    const metaAccessToken = Deno.env.get('META_ACCESS_TOKEN');
-    if (!metaAccessToken) {
+    const metaSearchToken = Deno.env.get('META_SEARCH_TOKEN') || '';
+    if (!metaSearchToken) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Meta API access token not configured' }),
+        JSON.stringify({ success: false, error: 'META_SEARCH_TOKEN not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     // Initialize Meta API client
     const metaClient = new MetaAdLibraryClient({
-      access_token: metaAccessToken,
+      access_token: metaSearchToken,
     });
 
     const country = body.country || 'DE';
@@ -275,7 +274,11 @@ serve(async (req) => {
       console.log(`Search terms: ${searchTerms.slice(0, 5).join(', ')}...`);
 
       // Search with each term and collect results
-      for (const term of searchTerms.slice(0, 8)) {
+      let lastSearchError: unknown = null;
+      let searchErrorCount = 0;
+      const termsToSearch = searchTerms.slice(0, 8);
+
+      for (const term of termsToSearch) {
         // Limit to 8 searches to avoid rate limits
         try {
           const ads = await metaClient.fetchAllAds({
@@ -334,7 +337,31 @@ serve(async (req) => {
           await new Promise((r) => setTimeout(r, 100));
         } catch (error) {
           console.log(`Search term "${term}" failed:`, error);
+          lastSearchError = error;
+          searchErrorCount++;
         }
+      }
+
+      // If ALL searches failed, propagate the error
+      if (searchErrorCount === termsToSearch.length && lastSearchError && pageMap.size === 0) {
+        const isRateLimit = lastSearchError instanceof MetaApiError && (lastSearchError.code === 613 || lastSearchError.code === 4);
+        const errorMsg = isRateLimit
+          ? 'Meta API Rate Limit erreicht. Bitte warte einige Minuten und versuche es erneut.'
+          : lastSearchError instanceof MetaApiError
+          ? `Meta API Fehler: ${lastSearchError.message} (Code: ${lastSearchError.code})`
+          : `API Fehler: ${String(lastSearchError)}`;
+
+        console.error(`ALL ${searchErrorCount} searches failed. Last error:`, lastSearchError);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: errorMsg,
+            query,
+            search_type: searchType,
+            is_rate_limit: isRateLimit,
+          }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
     }
 

@@ -17,6 +17,8 @@ import {
   PageInfo,
   PagesMapping,
   MetaAd,
+  DemographicsData,
+  AgeCountryGenderBreakdown,
 } from '../../../lib/types.ts';
 import { MetaAdLibraryClient, MetaApiError } from '../../../lib/meta-api.ts';
 import {
@@ -121,16 +123,16 @@ serve(async (req) => {
     }
 
     // ========== META API FETCH ==========
-    const metaAccessToken = Deno.env.get('META_ACCESS_TOKEN');
-    if (!metaAccessToken) {
+    const metaSearchToken = Deno.env.get('META_SEARCH_TOKEN') || '';
+    if (!metaSearchToken) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Meta API access token not configured' }),
+        JSON.stringify({ success: false, error: 'META_SEARCH_TOKEN not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     const metaClient = new MetaAdLibraryClient({
-      access_token: metaAccessToken,
+      access_token: metaSearchToken,
     });
 
     console.log(`[API] Loading ALL ads from page ${body.page_id} in countries: ${countries.join(', ')}`);
@@ -144,6 +146,17 @@ serve(async (req) => {
     });
 
     console.log(`[API] Loaded ${ads.length} ads from page`);
+
+    // Debug: check demographics availability
+    const adsWithBreakdown = ads.filter(a => a.age_country_gender_reach_breakdown && a.age_country_gender_reach_breakdown.length > 0);
+    console.log(`[API] Ads with age_country_gender_reach_breakdown: ${adsWithBreakdown.length}/${ads.length}`);
+    if (ads.length > 0) {
+      const sampleAd = ads[0];
+      console.log(`[API] Sample ad keys: ${Object.keys(sampleAd).join(', ')}`);
+      if (sampleAd.age_country_gender_reach_breakdown) {
+        console.log(`[API] Sample breakdown: ${JSON.stringify(sampleAd.age_country_gender_reach_breakdown.slice(0, 2))}`);
+      }
+    }
 
     // Process and sort ads
     const processedAds = processAds(ads);
@@ -167,6 +180,9 @@ serve(async (req) => {
     const allCaptions = ads.flatMap((ad) => ad.ad_creative_link_captions || []);
     const domains = extractDomainsFromCaptions(allCaptions);
 
+    // Aggregate demographics from raw ads
+    const demographics = aggregateDemographics(ads);
+
     // Build response
     const response: BrandSearchResponse = {
       success: true,
@@ -175,6 +191,7 @@ serve(async (req) => {
       pages,
       domains,
       ads: processedAds,
+      demographics,
     };
 
     // ========== SAVE TO CACHE ==========
@@ -188,9 +205,10 @@ serve(async (req) => {
           page_name: pageName,
           country: countryKey,
           total_ads: ads.length,
+          total_reach: demographics?.total_sample || 0,
           data: response,
           created_at: new Date().toISOString(),
-          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24h
+          expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(), // 90 days
         }, {
           onConflict: 'page_id,country',
         });
@@ -277,6 +295,75 @@ function processAds(ads: MetaAd[]): ProcessedAd[] {
  * Preserves the path if present (e.g., "MONAPURE.DE/COLLECTIONS/SALE" → "https://monapure.de/collections/sale")
  * Falls back to just domain if no path (e.g., "MIAVOLA.DE" → "https://miavola.de")
  */
+/**
+ * Aggregate demographics from age_country_gender_reach_breakdown across all ads
+ */
+function aggregateDemographics(ads: MetaAd[]): DemographicsData | undefined {
+  let totalMale = 0;
+  let totalFemale = 0;
+  let totalUnknown = 0;
+  const ageMap: Record<string, number> = {};
+  const countryMap: Record<string, number> = {};
+  let totalSample = 0;
+
+  for (const ad of ads) {
+    const breakdown = ad.age_country_gender_reach_breakdown;
+    if (!breakdown || !Array.isArray(breakdown)) continue;
+
+    // Real API structure: [{country: "DE", age_gender_breakdowns: [{age_range, male?, female?, unknown?}]}]
+    for (const countryEntry of breakdown) {
+      const country = countryEntry.country || 'unknown';
+      const ageBreakdowns = countryEntry.age_gender_breakdowns;
+      if (!ageBreakdowns || !Array.isArray(ageBreakdowns)) continue;
+
+      for (const ageEntry of ageBreakdowns) {
+        const male = ageEntry.male || 0;
+        const female = ageEntry.female || 0;
+        const unknown = ageEntry.unknown || 0;
+        const entryTotal = male + female + unknown;
+
+        totalMale += male;
+        totalFemale += female;
+        totalUnknown += unknown;
+        totalSample += entryTotal;
+
+        // Age groups
+        const age = ageEntry.age_range || 'unknown';
+        ageMap[age] = (ageMap[age] || 0) + entryTotal;
+
+        // Countries
+        countryMap[country] = (countryMap[country] || 0) + entryTotal;
+      }
+    }
+  }
+
+  if (totalSample === 0) return undefined;
+
+  const genderTotal = totalMale + totalFemale + totalUnknown;
+  const gender = {
+    male: Math.round((totalMale / genderTotal) * 100),
+    female: Math.round((totalFemale / genderTotal) * 100),
+    unknown: Math.round((totalUnknown / genderTotal) * 100),
+  };
+
+  const age_groups = Object.entries(ageMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([group, reach]) => ({
+      group,
+      pct: Math.round((reach / totalSample) * 100),
+    }));
+
+  const countries = Object.entries(countryMap)
+    .sort(([, a], [, b]) => b - a)
+    .map(([country, reach]) => ({
+      country,
+      reach,
+      pct: Math.round((reach / totalSample) * 100),
+    }));
+
+  return { gender, age_groups, countries, total_sample: totalSample };
+}
+
 function extractFullUrlFromCaption(caption: string): string | null {
   if (!caption) return null;
 

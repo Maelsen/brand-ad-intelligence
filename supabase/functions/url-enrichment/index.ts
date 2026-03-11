@@ -102,8 +102,8 @@ serve(async (req) => {
 
     console.log(`[URL] Enriching ${ads.length} ads for page ${page_id} (headless: ${use_headless})`);
 
-    // Get fresh META_ACCESS_TOKEN to replace potentially expired tokens in snapshot URLs
-    const metaToken = Deno.env.get('META_ACCESS_TOKEN');
+    // Get fresh META_SEARCH_TOKEN to replace potentially expired tokens in snapshot URLs
+    const metaToken = Deno.env.get('META_SEARCH_TOKEN') || '';
 
     // Replace expired access_tokens in snapshot URLs with fresh token
     if (metaToken) {

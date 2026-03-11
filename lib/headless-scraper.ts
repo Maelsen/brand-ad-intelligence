@@ -9,6 +9,7 @@
  */
 
 import { PLATFORM_DOMAINS, isPlatformDomain, isValidExternalUrl } from './constants.ts';
+import { BrowserRenderer } from './browser-renderer.ts';
 
 export interface HeadlessScrapeResult {
   success: boolean;
@@ -61,39 +62,126 @@ export async function scrapeWithHeadless(
   const adLibraryUrl = adIdMatch ? `https://www.facebook.com/ads/library/?id=${adIdMatch[1]}` : null;
   let totalCredits = 0;
 
-  // Strategy 1: JS Render + Extract rules on ORIGINAL render_ad URL (5 credits)
-  console.log(`[ScrapingBee] Ad ${logId}: Trying Strategy 1 (extract rules on render_ad)...`);
-  const extractResult = await tryScrapingBeeExtract(snapshotUrl, key, logId);
-  totalCredits += 5; // ScrapingBee always charges for the request
-  if (extractResult.success) {
-    extractResult.credits_used = totalCredits;
-    console.log(`[ScrapingBee] Ad ${logId}: Found URL: ${extractResult.url?.substring(0, 80)}...`);
-    return extractResult;
-  }
+  // Strategy 0: LOCAL BROWSER render + DOM extraction (FREE, no credits)
+  // Uses page.evaluate() with CSS selectors (same as ScrapingBee extract_rules)
+  // Much more reliable than regex on serialized HTML for Facebook's React pages.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const renderer = BrowserRenderer.getInstance();
 
-  // Strategy 2: Try Ad Library URL with extract rules (different page, might have different links)
-  if (adLibraryUrl) {
-    console.log(`[ScrapingBee] Ad ${logId}: Trying Strategy 2 (extract rules on Ad Library)...`);
-    const adLibResult = await tryScrapingBeeExtract(adLibraryUrl, key, logId);
-    totalCredits += 5;
-    if (adLibResult.success) {
-      adLibResult.credits_used = totalCredits;
-      console.log(`[ScrapingBee] Ad ${logId}: Found URL via Ad Library: ${adLibResult.url?.substring(0, 80)}...`);
-      return adLibResult;
+      if (attempt === 0) {
+        console.log(`[Headless] Ad ${logId}: Trying local browser render...`);
+      } else {
+        console.log(`[Headless] Ad ${logId}: Retry local browser (attempt ${attempt + 1})...`);
+      }
+      const browserResult = await renderer.renderPage(snapshotUrl, {
+        wait_ms: 5000,
+        timeout_ms: 25000,
+      });
+
+      // First: check DOM-extracted URLs (most reliable for Facebook)
+      if (browserResult.extracted_urls) {
+        const eu = browserResult.extracted_urls;
+        const lphpCount = eu.lphp_links.length;
+        const lynxCount = eu.lynx_uris.length;
+        const extCount = eu.external_links.length;
+
+        // Try l.php links first (same priority as ScrapingBee Strategy 1)
+        for (const href of eu.lphp_links) {
+          const cleanUrl = extractUrlFromFacebookRedirect(href);
+          if (cleanUrl && isValidExternalUrl(cleanUrl)) {
+            console.log(`[Headless] Ad ${logId}: Local DOM extract → l.php → ${cleanUrl.substring(0, 80)} (lphp=${lphpCount}, lynx=${lynxCount}, ext=${extCount})`);
+            const finalResult = await followRedirectsSimple(cleanUrl);
+            return {
+              success: true, url: cleanUrl, final_url: finalResult.final_url,
+              full_path: extractPathAndQuery(finalResult.final_url),
+              redirect_chain: finalResult.chain, method: 'scrapingbee_extract', credits_used: 0,
+            };
+          }
+        }
+
+        // Try lynx-uri attributes
+        for (const uri of eu.lynx_uris) {
+          const cleanUrl = extractUrlFromFacebookRedirect(uri);
+          if (cleanUrl && isValidExternalUrl(cleanUrl)) {
+            console.log(`[Headless] Ad ${logId}: Local DOM extract → lynx-uri → ${cleanUrl.substring(0, 80)}`);
+            const finalResult = await followRedirectsSimple(cleanUrl);
+            return {
+              success: true, url: cleanUrl, final_url: finalResult.final_url,
+              full_path: extractPathAndQuery(finalResult.final_url),
+              redirect_chain: finalResult.chain, method: 'scrapingbee_extract', credits_used: 0,
+            };
+          }
+        }
+
+        // Try external links
+        for (const href of eu.external_links) {
+          if (isValidExternalUrl(href)) {
+            console.log(`[Headless] Ad ${logId}: Local DOM extract → external → ${href.substring(0, 80)}`);
+            const finalResult = await followRedirectsSimple(href);
+            return {
+              success: true, url: href, final_url: finalResult.final_url,
+              full_path: extractPathAndQuery(finalResult.final_url),
+              redirect_chain: finalResult.chain, method: 'scrapingbee_extract', credits_used: 0,
+            };
+          }
+        }
+
+        console.log(`[Headless] Ad ${logId}: Local DOM extract found no valid URLs (lphp=${lphpCount}, lynx=${lynxCount}, ext=${extCount})`);
+      }
+
+      // Fallback: regex on HTML string
+      if (browserResult.html && browserResult.html.length > 500) {
+        const url = extractUrlFromRenderedHtml(browserResult.html);
+        if (url) {
+          console.log(`[Headless] Ad ${logId}: Local HTML regex → ${url.substring(0, 80)}`);
+          const finalResult = await followRedirectsSimple(url);
+          return {
+            success: true, url: url, final_url: finalResult.final_url,
+            full_path: extractPathAndQuery(finalResult.final_url),
+            redirect_chain: finalResult.chain, method: 'scrapingbee_js_render', credits_used: 0,
+          };
+        }
+        console.log(`[Headless] Ad ${logId}: Local browser rendered but no URL found (${browserResult.html.length} chars)`);
+        break; // HTML was there, DOM extraction ran — no point retrying
+      } else {
+        console.log(`[Headless] Ad ${logId}: Local browser failed: ${browserResult.error || 'empty HTML'}`);
+        // On Protocol error, retry once
+        if (attempt === 0 && browserResult.error?.includes('Protocol error')) continue;
+        break;
+      }
+    } catch (error) {
+      const errMsg = String(error);
+      console.log(`[Headless] Ad ${logId}: Local browser error: ${errMsg.substring(0, 100)}`);
+      // Retry on Protocol error / crash
+      if (attempt === 0 && errMsg.includes('Protocol error')) continue;
+      break;
     }
   }
 
-  // Strategy 3: Full JS render on render_ad URL and parse HTML (5 credits)
-  console.log(`[ScrapingBee] Ad ${logId}: Trying Strategy 3 (full render)...`);
+  // ScrapingBee as last-resort fallback (only if local browser failed)
+  console.log(`[Headless] Ad ${logId}: Local failed — trying ScrapingBee fallback...`);
+
+  // Strategy 1: CSS extract rules (5 credits, cheapest)
+  const extractResult = await tryScrapingBeeExtract(snapshotUrl, key, logId);
+  totalCredits += extractResult.credits_used;
+  if (extractResult.success) return extractResult;
+
+  // Strategy 2: Full JS render + regex (5 credits)
   const renderResult = await tryScrapingBeeRender(snapshotUrl, key, logId);
-  totalCredits += 5;
-  if (renderResult.success) {
-    renderResult.credits_used = totalCredits;
-    console.log(`[ScrapingBee] Ad ${logId}: Found URL: ${renderResult.url?.substring(0, 80)}...`);
-    return renderResult;
+  totalCredits += renderResult.credits_used;
+  if (renderResult.success) return renderResult;
+
+  // Strategy 2b: Try Ad Library URL if different from snapshot
+  if (adLibraryUrl && adLibraryUrl !== snapshotUrl) {
+    console.log(`[Headless] Ad ${logId}: Trying Ad Library URL...`);
+    const altResult = await tryScrapingBeeExtract(adLibraryUrl, key, logId);
+    totalCredits += altResult.credits_used;
+    if (altResult.success) return altResult;
   }
 
-  console.log(`[ScrapingBee] Ad ${logId}: All strategies failed (${totalCredits} credits used)`);
+  // All methods exhausted
+  console.log(`[Headless] Ad ${logId}: All methods failed (${totalCredits} credits used)`);
   return {
     success: false,
     url: null,
@@ -102,7 +190,7 @@ export async function scrapeWithHeadless(
     redirect_chain: [],
     method: 'scrapingbee_extract',
     credits_used: totalCredits,
-    error: 'All ScrapingBee strategies failed',
+    error: 'All extraction methods failed',
   };
 }
 
@@ -474,6 +562,79 @@ export async function batchScrapeWithHeadless(
 
   console.log(`[ScrapingBee] Batch complete: ${results.size} ads, ~${totalCredits} credits used`);
   return results;
+}
+
+/**
+ * Extract ad creative image/video URL via ScrapingBee (fallback for Chromium crashes).
+ * Uses CSS extract_rules with same selectors as browser-renderer.ts extractAdPreview().
+ * Costs 5 credits per call.
+ */
+export async function scrapeAdPreviewWithScrapingBee(
+  snapshotUrl: string,
+  adId: string,
+  apiKey?: string
+): Promise<{ image_url: string | null; video_url: string | null; type: 'image' | 'video' | 'unknown' }> {
+  const key = apiKey || Deno.env.get('SCRAPINGBEE_API_KEY');
+  if (!key) return { image_url: null, video_url: null, type: 'unknown' };
+
+  try {
+    const params = new URLSearchParams({
+      api_key: key,
+      url: snapshotUrl,
+      render_js: 'true',
+      wait: '5000',
+      extract_rules: JSON.stringify({
+        images: {
+          selector: 'img[src*="scontent"][src*="fbcdn.net"]',
+          output: '@src',
+          type: 'list',
+        },
+        videos: {
+          selector: 'video[src*="fbcdn.net"], video source[src*="fbcdn.net"]',
+          output: '@src',
+          type: 'list',
+        },
+        video_posters: {
+          selector: 'video[poster]',
+          output: '@poster',
+          type: 'list',
+        },
+      }),
+    });
+
+    const response = await fetch(`${SCRAPINGBEE_BASE_URL}?${params}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (!response.ok) {
+      console.log(`[ScrapingBee] Preview ${adId}: HTTP ${response.status}`);
+      return { image_url: null, video_url: null, type: 'unknown' };
+    }
+
+    const data = await response.json();
+    const images: string[] = data.images || [];
+    const videos: string[] = data.videos || [];
+    const videoPosters: string[] = data.video_posters || [];
+
+    // Video ads: prefer poster (HD thumbnail) over images (often just 60x60 page logo)
+    const hasVideo = videos.length > 0;
+    const bestImage = images.sort((a, b) => b.length - a.length)[0] || null;
+    const creative = hasVideo
+      ? (videoPosters[0] || bestImage)
+      : (bestImage || videoPosters[0] || null);
+    const video = videos[0] || null;
+    const type = video ? 'video' : creative ? 'image' : 'unknown';
+
+    if (type !== 'unknown') {
+      console.log(`[ScrapingBee] Preview ${adId}: Success (${type}, ${images.length} imgs, ${videos.length} vids)`);
+    } else {
+      console.log(`[ScrapingBee] Preview ${adId}: No media found (${images.length} imgs, ${videos.length} vids)`);
+    }
+    return { image_url: creative, video_url: video, type };
+  } catch (error) {
+    console.log(`[ScrapingBee] Preview ${adId}: Error ${String(error).substring(0, 80)}`);
+    return { image_url: null, video_url: null, type: 'unknown' };
+  }
 }
 
 function makeFailResult(method: HeadlessScrapeResult['method'], error: string): HeadlessScrapeResult {

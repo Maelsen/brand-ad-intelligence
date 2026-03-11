@@ -40,10 +40,14 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY');
-    const metaToken = Deno.env.get('META_ACCESS_TOKEN_V2') || Deno.env.get('META_ACCESS_TOKEN');
+    // Multi-token: META_ACCESS_TOKENS (comma-separated), no fallback
+    const metaAccessTokens: string[] = (() => {
+      const multi = Deno.env.get('META_ACCESS_TOKENS');
+      if (multi) return multi.split(',').map(t => t.trim()).filter(t => t.length > 0);
+      return [];
+    })();
     const workerUrl = Deno.env.get('WORKER_URL');         // e.g., "http://your-vps:8787"
     const workerSecret = Deno.env.get('WORKER_API_SECRET');
-    const scrapingBeeKey = Deno.env.get('SCRAPINGBEE_API_KEY');
     const openaiKey = Deno.env.get('OPENAI_API_KEY');
 
     const supabase = supabaseUrl && supabaseKey
@@ -83,7 +87,7 @@ serve(async (req) => {
     // ============================================
     if (req.method === 'POST') {
       const body = await req.json();
-      const { brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh, mode, clear_cache, check_cache_only } = body;
+      const { brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh, mode, clear_cache, check_cache_only, page_id: lookupPageId } = body;
 
       if (!brand) {
         return jsonResponse({ error: 'brand is required' }, 400);
@@ -105,8 +109,8 @@ serve(async (req) => {
       // mode: 'deep' or unset = use worker if available
       const useWorker = mode !== 'quick';
 
-      if (!metaToken) {
-        return jsonResponse({ error: 'META_ACCESS_TOKEN not configured' }, 500);
+      if (metaAccessTokens.length === 0) {
+        return jsonResponse({ error: 'META_ACCESS_TOKEN(S) not configured' }, 500);
       }
 
       const brandLower = brand.toLowerCase().trim();
@@ -127,10 +131,56 @@ serve(async (req) => {
 
         if (cached?.data) {
           console.log(`[Discovery] Cache hit for "${brand}"`);
+          const cacheData = { ...(cached.data as any) };
+          // Filter out dismissed pages
+          if (cacheData.pages?.third_party && supabase) {
+            const { data: dismissed } = await supabase
+              .from('dismissed_third_party_pages')
+              .select('page_id')
+              .eq('brand', brandLower);
+            if (dismissed && dismissed.length > 0) {
+              const dismissedIds = new Set(dismissed.map((d: any) => d.page_id));
+              cacheData.pages.third_party = cacheData.pages.third_party.filter(
+                (p: any) => !dismissedIds.has(p.page_id)
+              );
+            }
+          }
           return jsonResponse({
-            ...cached.data,
+            ...cacheData,
             status: 'cached',
           });
+        }
+
+        // Fallback: lookup by page_id inside cached JSONB data
+        // This handles cases where brand name differs from FB page name
+        // (e.g., pipeline submitted "Algensalbe" but FB page is "Biovolen")
+        if (lookupPageId) {
+          const { data: pageIdCached } = await supabase
+            .from('domain_mapping_cache')
+            .select('data')
+            .eq('country', effectiveCountry)
+            .gt('expires_at', new Date().toISOString())
+            .filter('data->pages->official', 'cs', `[{"page_id":"${lookupPageId}"}]`)
+            .maybeSingle();
+
+          if (pageIdCached?.data) {
+            console.log(`[Discovery] Cache hit via page_id ${lookupPageId} for "${brand}"`);
+            const pidData = { ...(pageIdCached.data as any) };
+            // Filter out dismissed pages
+            if (pidData.pages?.third_party && supabase) {
+              const { data: dismissed } = await supabase
+                .from('dismissed_third_party_pages')
+                .select('page_id')
+                .eq('brand', brandLower);
+              if (dismissed && dismissed.length > 0) {
+                const dismissedIds = new Set(dismissed.map((d: any) => d.page_id));
+                pidData.pages.third_party = pidData.pages.third_party.filter(
+                  (p: any) => !dismissedIds.has(p.page_id)
+                );
+              }
+            }
+            return jsonResponse({ ...pidData, status: 'cached' });
+          }
         }
       }
 
@@ -150,7 +200,7 @@ serve(async (req) => {
               'Content-Type': 'application/json',
               ...(workerSecret ? { 'Authorization': `Bearer ${workerSecret}` } : {}),
             },
-            body: JSON.stringify({ brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh }),
+            body: JSON.stringify({ brand, country, countries, keywords, use_headless, max_keyword_ads, force_refresh, page_id: lookupPageId }),
           });
 
           const workerData = await workerResponse.json();
@@ -176,10 +226,9 @@ serve(async (req) => {
         max_keywords: 3,                            // Edge fn: 3 keywords max
         max_brand_ads: 200,                         // Edge fn: 200 brand ads (was 300)
         max_domains_to_check: 15,                   // Edge fn: max 15 domains to brand-check
-        use_headless: use_headless && !!scrapingBeeKey,
-        use_headless_for_domains: use_headless && !!scrapingBeeKey, // Enable ScrapingBee for domain checks when requested
-        access_token: metaToken,
-        scrapingbee_key: scrapingBeeKey || undefined,
+        use_headless: use_headless,
+        use_headless_for_domains: false,  // Edge fn: no headless for domain checks (60s limit)
+        access_tokens: metaAccessTokens,
         openai_key: openaiKey || undefined,
         timeout_ms: 50000,                          // 50s hard deadline (Supabase Pro = 60s)
         onProgress: (step, detail) => {

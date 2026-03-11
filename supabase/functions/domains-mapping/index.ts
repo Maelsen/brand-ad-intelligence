@@ -65,11 +65,10 @@ serve(async (req) => {
       );
     }
 
-    // Get Meta API access token from environment
-    const metaAccessToken = Deno.env.get('META_ACCESS_TOKEN');
-    if (!metaAccessToken) {
+    const metaSearchToken = Deno.env.get('META_SEARCH_TOKEN') || '';
+    if (!metaSearchToken) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Meta API access token not configured' }),
+        JSON.stringify({ success: false, error: 'META_SEARCH_TOKEN not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -101,7 +100,7 @@ serve(async (req) => {
 
     // Initialize Meta API client
     const metaClient = new MetaAdLibraryClient({
-      access_token: metaAccessToken,
+      access_token: metaSearchToken,
     });
 
     // Determine countries to search

@@ -47,12 +47,16 @@ export interface TargetLocation {
   type: string;
 }
 
+export interface AgeGenderEntry {
+  age_range: string;
+  male?: number;
+  female?: number;
+  unknown?: number;
+}
+
 export interface AgeCountryGenderBreakdown {
   country: string;
-  age_range: string;
-  male: number;
-  female: number;
-  unknown: number;
+  age_gender_breakdowns: AgeGenderEntry[];
 }
 
 export interface BeneficiaryPayer {
@@ -81,6 +85,13 @@ export interface DomainsRequest {
 // API Response Types (Our API)
 // ============================================
 
+export interface DemographicsData {
+  gender: { male: number; female: number; unknown: number }; // Percent
+  age_groups: Array<{ group: string; pct: number }>;
+  countries: Array<{ country: string; reach: number; pct: number }>;
+  total_sample: number;
+}
+
 export interface BrandSearchResponse {
   success: boolean;
   brand: string;
@@ -88,6 +99,7 @@ export interface BrandSearchResponse {
   pages: PagesMapping;
   domains: string[];
   ads: ProcessedAd[];
+  demographics?: DemographicsData;
   error?: string;
 }
 
@@ -194,10 +206,14 @@ export interface FullUrlCacheEntry {
 
 // Third-Party Page with connection info
 export interface ThirdPartyPageInfo extends PageInfo {
-  connection_type: 'domain_match' | 'checkout_match' | 'content_match' | 'content_link' | 'redirect_match' | 'redirect' | 'presell_cta' | 'shopify_vendor' | 'direct';
+  connection_type: 'domain_match' | 'checkout_match' | 'content_match' | 'content_link' | 'redirect_match' | 'redirect' | 'presell_cta' | 'direct' | 'deep_cta';
   confidence: number;
   discovered_via: string;
   domains_used: string[];
+  flagged_suspicious?: boolean;  // AI false-positive detection
+  flag_reason?: string;          // AI reason for flagging
+  ai_verdict?: 'confirmed_false_positive' | 'confirmed_match' | 'uncertain';
+  ai_confidence?: number;        // 0.0 - 1.0
 }
 
 // Brand Domain Mapping
@@ -225,12 +241,14 @@ export interface RedirectChain {
 
 export interface BrandDiscoveryRequest {
   brand: string;
+  page_id?: string;          // Facebook page_id (from Light Pipeline) — skips keyword guessing
   country?: string;
   countries?: string[];
   keywords?: string[];       // Optional manual keywords
   max_keyword_ads?: number;  // Max ads per keyword search (default 500)
   use_headless?: boolean;    // Enable ScrapingBee fallback
   force_refresh?: boolean;   // Skip cache, force fresh discovery
+  resumeCheckpoint?: Record<string, unknown> | null; // Step-level checkpoint for resume (Worker-only)
 }
 
 export interface BrandDiscoveryResponse {
@@ -283,12 +301,13 @@ export interface BrandInfo {
   platform: ShopifyDetectionResult['platform'] | null;
   official_page_ids: string[];
   brand_payers?: string[];         // Beneficiary/payer from EU ad transparency data
+  brand_category?: string;         // AI-detected category (e.g., "Supplements", "Kosmetik")
 }
 
 export interface DomainBrandCheck {
   domain: string;
   is_match: boolean;
-  match_type: 'direct' | 'redirect' | 'shopify_vendor' | 'presell_cta' | 'checkout_match' | 'content_link' | 'content_match' | 'none';
+  match_type: 'direct' | 'redirect' | 'presell_cta' | 'checkout_match' | 'content_link' | 'content_match' | 'deep_cta' | 'none';
   confidence: number;
   final_url: string | null;
   redirect_chain: string[];
@@ -348,6 +367,51 @@ export interface CachedDomainMapping {
   data: DomainsResponse;
   created_at: string;
   expires_at: string;
+}
+
+// ============================================
+// Deep CTA Chain Follow Types
+// ============================================
+
+export interface DeepCTAChainResult {
+  initial_url: string;
+  chain: CTAHopResult[];
+  final_url: string | null;
+  final_domain: string | null;
+  is_brand_match: boolean;
+  match_method: 'cta_chain_checkout' | 'cta_chain_domain' | 'cta_chain_shopify' | 'none';
+  confidence: number;
+  total_credits_used: number;
+  total_hops: number;
+  error?: string;
+}
+
+export interface CTAHopResult {
+  hop_number: number;
+  page_url: string;
+  rendered: boolean;
+  cta_candidates: CTACandidate[];
+  chosen_cta: CTACandidate | null;
+  is_checkout: boolean;
+  domain: string;
+  credits_used: number;
+}
+
+export interface CTACandidate {
+  url: string;
+  text: string;
+  score: number;
+  is_external: boolean;
+  is_anchor: boolean;
+  element_type: string;
+}
+
+export interface DeepCTAOptions {
+  brand_info: BrandInfo;
+  max_hops?: number;
+  render_wait_ms?: number;
+  timeout_per_hop_ms?: number;
+  total_timeout_ms?: number;
 }
 
 // ============================================

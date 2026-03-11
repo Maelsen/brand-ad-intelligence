@@ -181,8 +181,7 @@ const GENERIC_AD_WORDS = new Set([
   'unglaublich', 'unglaubliche', 'unglaublichen',
   'passiert', 'aufgehört', 'angefangen', 'verändert',
   'tatsächlich', 'eigentlich', 'normalerweise', 'grundsätzlich',
-  'produkte', 'produkt', 'nahrungsergänzung', 'nahrungsergänzungsmittel',
-  'supplement', 'supplements', 'kapseln', 'tabletten', 'pulver',
+  'produkte', 'produkt',
   'zutat', 'zutaten', 'inhaltsstoffe', 'inhaltsstoff',
   // Conjugated verbs / forms that appear in generic ad copy
   'spitzenpreis', 'spitzenpreise', 'spitzenpreisen',
@@ -255,14 +254,10 @@ const GENERIC_AD_WORDS = new Set([
   'routine', 'routinen',
   'gleichgewicht',
   'wirksamkeit', 'wirkungsweise',
-  'vitamin', 'vitamine', 'vitaminen',
   'zustand', 'zustände', 'zuständen',
   'kraft', 'kräfte', 'kräften',
   'energie', 'energien',
-  'schönheit',
-  'pflege', 'pflegen', 'gepflegt',
-  'haut', 'haare', 'nägel', 'haar',
-  'anti-aging', 'anti', 'aging',
+  'anti',
   'strahlend', 'strahlende', 'strahlenden',
   'jugendlich', 'jugendliche', 'jugendlichen',
   'fühlen', 'fühlt', 'fühlst', 'gefühlt',
@@ -274,22 +269,11 @@ const GENERIC_AD_WORDS = new Set([
   'aktive', 'aktiven', 'aktiver', 'aktives', 'aktivem',
   'allein', 'alleine', 'einzeln', 'solo',
   'bundles', 'bundle', 'kombination', 'kombinationen',
-  'calcium', 'magnesium', 'zink', 'eisen', 'jod', 'selen',
-  'darm', 'darmflora', 'verdauung',
-  'müde', 'müdigkeit', 'erschöpft', 'erschöpfung',
-  'schlaf', 'schlafen', 'schlafqualität',
-  'stress', 'stressig', 'entspannung', 'entspannt',
-  'immunsystem', 'abwehrkräfte', 'immunabwehr',
-  'stoffwechsel', 'metabolismus',
-  'abnehmen', 'gewicht', 'diät', 'figur',
-  'muskel', 'muskeln', 'muskelaufbau',
-  'gelenke', 'gelenk', 'gelenkschmerzen',
-  'entzündung', 'entzündungen', 'entzündlich',
+  'stressig', 'entspannt',
   'symptome', 'symptom', 'beschwerden', 'beschwerde',
   'diagnose', 'therapie', 'behandlung', 'behandlungen',
   'arzt', 'ärzte', 'ärztin', 'ärztlich', 'ärztliche',
   'studie', 'studien', 'forschung', 'wissenschaft',
-  'wirkstoff', 'wirkstoffe', 'wirkstoffkomplex',
   // Very common German words / verb forms that slip through
   'etwas', 'kannst', 'könnte', 'könnten', 'sollte', 'sollten',
   'trotz', 'trotzdem', 'obwohl', 'dennoch',
@@ -516,13 +500,14 @@ function capitalize(word: string): string {
  * Refine keywords using AI (GPT-4o-mini).
  * Takes candidate keywords from ad text extraction and selects the most
  * product-niche-specific ones that competitors/affiliates would also use.
+ * Also detects the brand's product category for use in AI verification.
  *
  * @param candidates - Raw candidate keywords from extractAndScoreWords
  * @param brandName - Brand name (e.g., "Glow25 - The Collagen Company")
  * @param brandPageName - Official page name for context
  * @param maxKeywords - Max keywords to return
  * @param openaiKey - OpenAI API key
- * @returns Refined keyword list, or null if AI call fails
+ * @returns Object with keywords and brand_category, or null if AI call fails
  */
 export async function refineKeywordsWithAI(
   candidates: string[],
@@ -530,25 +515,34 @@ export async function refineKeywordsWithAI(
   brandPageName: string,
   maxKeywords: number = 8,
   openaiKey?: string
-): Promise<string[] | null> {
+): Promise<{ keywords: string[]; brand_category: string | null } | null> {
   if (!openaiKey) return null;
   if (candidates.length === 0) return null;
 
   try {
-    const prompt = `Du bist ein Marketing-Analyst für Facebook-Werbung. Die Marke "${brandName}" (Facebook-Seite: "${brandPageName}") schaltet Werbeanzeigen.
+    const prompt = `Du bist ein Marketing-Analyst fuer Facebook-Werbung. Die Marke "${brandName}" (Facebook-Seite: "${brandPageName}") schaltet Werbeanzeigen.
 
-Aus den Werbetexten der Marke wurden diese Wörter/Begriffe extrahiert (sortiert nach Häufigkeit):
+Aus den Werbetexten der Marke wurden diese Woerter/Begriffe extrahiert (sortiert nach Haeufigkeit):
 ${candidates.slice(0, 40).join(', ')}
 
-Aufgabe: Wähle die ${maxKeywords} besten NISCHEN-KEYWORDS aus, die:
-1. Spezifisch für die PRODUKTKATEGORIE/NISCHE dieser Marke sind
-2. Von Drittanbietern/Affiliates/Presell-Seiten dieser Marke auch in deren Facebook-Werbung verwendet würden
-3. NICHT zu generisch sind (keine allgemeinen Wörter wie "Gesundheit", "Qualität", "Angebot")
-4. Als Meta Ad Library Suchbegriffe funktionieren (einzelne Wörter oder kurze Phrasen)
+Aufgabe 1: Waehle die ${maxKeywords} besten NISCHEN-KEYWORDS aus, die:
+1. Spezifisch fuer die PRODUKTKATEGORIE/NISCHE dieser Marke sind
+2. Von Drittanbietern/Affiliates/Presell-Seiten dieser Marke auch in deren Facebook-Werbung verwendet wuerden
+3. NICHT zu generisch sind (keine allgemeinen Woerter wie "Gesundheit", "Qualitaet", "Angebot")
+4. Als Meta Ad Library Suchbegriffe funktionieren (einzelne Woerter oder kurze Phrasen)
 
-Wenn die Kandidaten-Liste KEINE guten Nischen-Keywords enthält, generiere selbst 3-5 passende Keywords basierend auf dem Markennamen und der Produktkategorie.
+Wenn die Kandidaten-Liste KEINE guten Nischen-Keywords enthaelt, generiere selbst 3-5 passende Keywords basierend auf dem Markennamen und der Produktkategorie.
 
-Antworte NUR mit den Keywords, eines pro Zeile, ohne Nummerierung oder Erklärung.`;
+Aufgabe 2: Bestimme die PRODUKTKATEGORIE der Marke (z.B. "Nahrungsergaenzungsmittel", "Kosmetik", "Fitness-Geraete", "Mode", "Haushalt", "Software", etc.)
+
+Antworte in diesem Format (EXAKT so, keine Abweichung):
+KATEGORIE: [Produktkategorie auf Deutsch]
+KEYWORDS:
+[Keyword 1]
+[Keyword 2]
+...
+
+Die Keywords MUESSEN auf Deutsch sein — keine englischen Begriffe.`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -558,9 +552,12 @@ Antworte NUR mit den Keywords, eines pro Zeile, ohne Nummerierung oder Erklärun
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'system', content: 'Du bist ein deutschsprachiger Marketing-Analyst. Antworte IMMER auf Deutsch. Verwende ausschliesslich deutsche Begriffe und Fachterminologie.' },
+          { role: 'user', content: prompt },
+        ],
         temperature: 0.3,
-        max_tokens: 200,
+        max_tokens: 300,
       }),
     });
 
@@ -573,20 +570,32 @@ Antworte NUR mit den Keywords, eines pro Zeile, ohne Nummerierung oder Erklärun
     const content = data.choices?.[0]?.message?.content?.trim();
     if (!content) return null;
 
-    const refined = content
+    // Parse category
+    let brand_category: string | null = null;
+    const categoryMatch = content.match(/KATEGORIE:\s*(.+)/i);
+    if (categoryMatch) {
+      brand_category = categoryMatch[1].trim();
+      console.log(`[Keywords] AI detected category: "${brand_category}"`);
+    }
+
+    // Parse keywords (everything after KEYWORDS: line)
+    const keywordsSection = content.split(/KEYWORDS:\s*/i)[1] || content;
+    const refined = keywordsSection
       .split('\n')
       .map((line: string) => line.trim())
       .filter((line: string) => line.length >= 3 && line.length <= 40)
       .filter((line: string) => !/^\d+[\.\)]/.test(line)) // Remove numbered lines
+      .filter((line: string) => !/^KATEGORIE/i.test(line)) // Remove category line if present
       .map((line: string) => line.replace(/^[-•*]\s*/, '').trim()) // Remove bullet points
       .filter((line: string) => line.length >= 3)
       .slice(0, maxKeywords);
 
     console.log(`[Keywords] AI refined: ${JSON.stringify(refined)} (from ${candidates.length} candidates)`);
-    return refined.length > 0 ? refined : null;
+    return refined.length > 0 ? { keywords: refined, brand_category } : null;
 
   } catch (error) {
     console.log(`[Keywords] AI refinement error: ${error}`);
     return null;
   }
 }
+

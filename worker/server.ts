@@ -27,7 +27,7 @@ import { BrandDiscoveryRequest, BrandDiscoveryResponse } from '../lib/types.ts';
 import { BrowserRenderer, killAllChromiumProcesses } from '../lib/browser-renderer.ts';
 import { checkFalsePositives, applyFalsePositiveFlags } from '../lib/false-positive-detector.ts';
 // Old name-based verifier no longer used — replaced by content-based ai-content-verifier
-import { verifyAllPages, applyContentVerification } from '../lib/ai-content-verifier.ts';
+import { verifyAllPages, applyContentVerification, cleanupOrphanedDomains } from '../lib/ai-content-verifier.ts';
 
 // ============================================
 // Crash Protection: Prevent unhandled rejections from killing the worker
@@ -305,6 +305,9 @@ async function processNextJob(supabase: SupabaseClient | null): Promise<void> {
 
         // Update result: only keep verified pages
         result.pages.third_party = kept as any;
+
+        // Clean up orphaned domain entries (presell, redirect, domain_urls, etc.)
+        cleanupOrphanedDomains(result);
 
         // Store removed pages in dismissed_third_party_pages for audit trail
         if (supabase && removed.length > 0) {
@@ -1053,6 +1056,19 @@ async function handleRequest(req: Request, supabase: SupabaseClient | null): Pro
       for (const { brand, data: cachedData } of brandsToCheck) {
         const pages = cachedData.pages?.third_party || [];
         if (pages.length === 0) {
+          // Even with 0 pages, clean up orphaned domains if apply mode
+          if (applyChanges) {
+            const beforeDomains = cachedData.domains?.all?.length || 0;
+            cleanupOrphanedDomains(cachedData);
+            const afterDomains = cachedData.domains?.all?.length || 0;
+            if (beforeDomains !== afterDomains) {
+              await supabase
+                .from('domain_mapping_cache')
+                .update({ data: cachedData })
+                .eq('brand', brand);
+              console.log(`[VerifyContent] ${brand}: 0 pages, cleaned ${beforeDomains - afterDomains} orphaned domains`);
+            }
+          }
           results[brand] = { total: 0, message: 'No third-party pages' };
           continue;
         }
@@ -1071,6 +1087,8 @@ async function handleRequest(req: Request, supabase: SupabaseClient | null): Pro
 
           // Update domain_mapping_cache
           cachedData.pages.third_party = kept;
+          // Clean up orphaned domain entries
+          cleanupOrphanedDomains(cachedData);
           await supabase
             .from('domain_mapping_cache')
             .update({ data: cachedData })
@@ -1360,6 +1378,8 @@ async function runCleanupFP(supabase: SupabaseClient): Promise<void> {
           cachedData.pages.third_party = cachedData.pages.third_party.filter(
             (p: any) => !removedIds.has(p.page_id)
           );
+          // Clean up orphaned domain entries
+          cleanupOrphanedDomains(cachedData);
           await supabase
             .from('domain_mapping_cache')
             .update({ data: cachedData })
@@ -1382,6 +1402,8 @@ async function runCleanupFP(supabase: SupabaseClient): Promise<void> {
             jobData.result.pages.third_party = jobData.result.pages.third_party.filter(
               (p: any) => !removedIds.has(p.page_id)
             );
+            // Clean up orphaned domain entries in job result too
+            cleanupOrphanedDomains(jobData.result);
             await supabase
               .from('discovery_jobs')
               .update({ result: jobData.result })

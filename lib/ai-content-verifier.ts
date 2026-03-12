@@ -684,3 +684,76 @@ export function applyContentVerification(
 
   return { kept, removed };
 }
+
+/**
+ * Clean up orphaned domain entries after pages have been removed.
+ * When third_party pages are removed (by AI verification or FP cleanup),
+ * the associated domain entries (presell, redirect, domain_urls, etc.)
+ * must also be cleaned up to keep the cache consistent.
+ */
+export function cleanupOrphanedDomains(cachedData: any): void {
+  const pages = cachedData.pages?.third_party || [];
+  const brandDomain = cachedData.brand_domain;
+
+  // 1. Collect all domains still referenced by surviving pages
+  const aliveDomains = new Set<string>();
+  if (brandDomain) aliveDomains.add(brandDomain);
+
+  for (const page of pages) {
+    if (page.discovered_via) aliveDomains.add(page.discovered_via);
+    if (page.domains_used) {
+      for (const d of page.domains_used) aliveDomains.add(d);
+    }
+  }
+
+  // 2. Filter domains.presell, domains.redirect, domains.all
+  if (cachedData.domains) {
+    const beforePresell = cachedData.domains.presell?.length || 0;
+    const beforeRedirect = cachedData.domains.redirect?.length || 0;
+
+    cachedData.domains.presell = (cachedData.domains.presell || [])
+      .filter((d: string) => aliveDomains.has(d));
+    cachedData.domains.redirect = (cachedData.domains.redirect || [])
+      .filter((d: string) => aliveDomains.has(d));
+    // Rebuild .all from surviving presell + redirect + final_shop (brand domain)
+    cachedData.domains.all = [...new Set([
+      ...cachedData.domains.presell,
+      ...cachedData.domains.redirect,
+      ...(cachedData.domains.final_shop || []),
+    ])];
+
+    const removedCount = (beforePresell - cachedData.domains.presell.length)
+      + (beforeRedirect - cachedData.domains.redirect.length);
+    if (removedCount > 0) {
+      console.log(`[DomainCleanup] Removed ${removedCount} orphaned domains (presell: ${beforePresell}→${cachedData.domains.presell.length}, redirect: ${beforeRedirect}→${cachedData.domains.redirect.length})`);
+    }
+  }
+
+  // 3. Filter domain_urls
+  if (cachedData.domain_urls) {
+    for (const domain of Object.keys(cachedData.domain_urls)) {
+      if (!aliveDomains.has(domain)) {
+        delete cachedData.domain_urls[domain];
+      }
+    }
+  }
+
+  // 4. Filter top_landing_pages
+  if (cachedData.top_landing_pages) {
+    cachedData.top_landing_pages = cachedData.top_landing_pages
+      .filter((lp: any) => aliveDomains.has(lp.domain));
+  }
+
+  // 5. Filter presell_chains
+  if (cachedData.presell_chains) {
+    cachedData.presell_chains = cachedData.presell_chains
+      .filter((c: any) => aliveDomains.has(c.presell_domain));
+  }
+
+  // 6. Update scan_stats.matches_found
+  if (cachedData.scan_stats) {
+    cachedData.scan_stats.matches_found =
+      (cachedData.domains?.presell?.length || 0) +
+      (cachedData.domains?.redirect?.length || 0);
+  }
+}
